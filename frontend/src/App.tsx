@@ -9,13 +9,12 @@ import { useAuth } from '@/contexts/AuthContext';
 // ── Lazy-loaded Pages ─────────────────────────────────────────
 // Split every top-level page into its own chunk for faster initial load.
 
-const LoginPage       = lazy(() => import('@/pages/LoginPage'));
-const RegisterPage    = lazy(() => import('@/pages/RegisterPage'));
-const DashboardPage   = lazy(() => import('@/pages/DashboardPage'));
-const TradingPage     = lazy(() => import('@/pages/TradingPage'));
-const PortfolioPage   = lazy(() => import('@/pages/PortfolioPage'));
-const HistoryPage     = lazy(() => import('@/pages/HistoryPage'));
-const AccountPage     = lazy(() => import('@/pages/AccountPage'));
+const LandingPage     = lazy(() => import('@/pages/Landing'));
+const LoginPage       = lazy(() => import('@/pages/Login'));
+const RegisterPage    = lazy(() => import('@/pages/Register'));
+const DashboardPage   = lazy(() => import('@/pages/Dashboard'));
+const MarketsPage     = lazy(() => import('@/pages/Markets'));
+const PrivatePage     = lazy(() => import('@/pages/Private'));
 
 // ── Loading Fallback ──────────────────────────────────────────
 
@@ -60,7 +59,9 @@ export default function App() {
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>
-        {/* ── Public ─────────────────────────────────────── */}
+        {/* ── Public / Marketing ─────────────────────────── */}
+        <Route path="/" element={<LandingPage />} />
+
         <Route
           path="/login"
           element={
@@ -88,49 +89,30 @@ export default function App() {
           }
         />
         <Route
-          path="/trade"
+          path="/markets"
           element={
             <PrivateRoute>
-              <TradingPage />
+              <MarketsPage />
             </PrivateRoute>
           }
         />
         <Route
-          path="/trade/:ticker"
+          path="/private"
           element={
             <PrivateRoute>
-              <TradingPage />
+              <PrivatePage />
             </PrivateRoute>
           }
         />
-        <Route
-          path="/portfolio"
-          element={
-            <PrivateRoute>
-              <PortfolioPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/history"
-          element={
-            <PrivateRoute>
-              <HistoryPage />
-            </PrivateRoute>
-          }
-        />
-        <Route
-          path="/account"
-          element={
-            <PrivateRoute>
-              <AccountPage />
-            </PrivateRoute>
-          }
-        />
+        {/* Stub routes for nav items not yet built — redirect to dashboard */}
+        <Route path="/charts"    element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+        <Route path="/orders"    element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+        <Route path="/screener"  element={<PrivateRoute><MarketsPage /></PrivateRoute>} />
+        <Route path="/watchlist" element={<PrivateRoute><MarketsPage /></PrivateRoute>} />
+        <Route path="/settings"  element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
 
         {/* ── Fallbacks ──────────────────────────────────── */}
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
   );
