@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Primary Meta -->
+    <title>Obsidian Capital — Private Wealth Brokerage</title>
+    <meta name="description" content="Obsidian Capital offers a distinguished brokerage experience for discerning investors. Seamless execution, transparent pricing, and personalized service for every tier of membership." />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Obsidian Capital — Private Wealth Brokerage" />
+    <meta property="og:description" content="Obsidian Capital offers a distinguished brokerage experience for discerning investors." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:site_name" content="Obsidian Capital" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Obsidian Capital — Private Wealth Brokerage" />
+    <meta name="twitter:description" content="A distinguished brokerage experience for discerning investors." />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Preconnect for performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Google Fonts: Inter + Playfair Display -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Inline critical styles to prevent FOUC -->
+    <style>
+      html, body {
+        background-color: #0a0a0a;
+        color: #f0ede8;
+        margin: 0;
+        padding: 0;
+      }
+      #root {
+        min-height: 100vh;
+      }
+      /* Loading spinner shown before React mounts */
+      .initial-loader {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: #0a0a0a;
+      }
+      .initial-loader__wordmark {
+        font-family: 'Playfair Display', Georgia, serif;
+        font-size: 1.5rem;
+        font-weight: 500;
+        color: #c9a84c;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        opacity: 0;
+        animation: wordmarkFade 0.8s ease-out 0.2s forwards;
+      }
+      @keyframes wordmarkFade {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Shown before React hydrates -->
+      <div class="initial-loader">
+        <span class="initial-loader__wordmark">Obsidian Capital</span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
