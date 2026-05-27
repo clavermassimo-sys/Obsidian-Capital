@@ -2,9 +2,10 @@
    Obsidian Capital — Charts Page
    ============================================================ */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import {
   ComposedChart,
+  BarChart,
   Bar,
   Line,
   XAxis,
@@ -15,7 +16,7 @@ import {
   ReferenceLine,
   Cell,
 } from 'recharts';
-import { Search, TrendingUp, BarChart2, Activity } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, BarChart2, Activity } from 'lucide-react';
 import { useTrading } from '@/contexts/TradingContext';
 import { formatCurrency } from '@/utils/format';
 
@@ -35,6 +36,16 @@ interface OHLCVBar {
   ma200?: number;
 }
 
+// ── Seeded PRNG ────────────────────────────────────────────────
+
+function seededRng(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    return (s >>> 0) / 0xffffffff;
+  };
+}
+
 // ── Mock data generator ───────────────────────────────────────
 
 const TICKER_BASE: Record<string, { price: number; name: string }> = {
@@ -46,46 +57,58 @@ const TICKER_BASE: Record<string, { price: number; name: string }> = {
   GOOGL: { price: 171.96, name: 'Alphabet Inc.' },
   META:  { price: 571.28, name: 'Meta Platforms' },
   JPM:   { price: 224.58, name: 'JPMorgan Chase' },
+  V:     { price: 289.34, name: 'Visa Inc.' },
+  BRK:   { price: 452.80, name: 'Berkshire Hathaway' },
 };
 
 function generateOHLCV(ticker: string, range: TimeRange): OHLCVBar[] {
   const base = TICKER_BASE[ticker]?.price ?? 150;
   const counts: Record<TimeRange, number> = {
-    '1D': 78,    // 5-min bars
-    '1W': 35,    // hourly
-    '1M': 22,    // daily
-    '3M': 63,    // daily
-    '1Y': 252,   // daily
-    'All': 756,  // weekly
+    '1D':  78,
+    '1W':  35,
+    '1M':  22,
+    '3M':  66,
+    '1Y':  252,
+    'All': 500,
   };
   const n = counts[range];
+
+  // Seeded random based on ticker chars + range to get consistent data
+  const tickerSeed = ticker.split('').reduce((acc, c, i) => acc + c.charCodeAt(0) * (i + 1), 0);
+  const rangeSeed  = range.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const rng = seededRng((tickerSeed * 31 + rangeSeed) & 0x7fffffff);
+
   const data: OHLCVBar[] = [];
-  let price = base * (0.85 + Math.random() * 0.1);
-  const seed = ticker.charCodeAt(0) / 100;
+  let price = base * (0.80 + rng() * 0.20);
+  const refDate = new Date('2026-05-26T16:00:00Z');
 
   for (let i = 0; i < n; i++) {
-    const drift = (Math.sin(i * seed) * 0.003 + 0.0004);
-    const vol = 0.012 + Math.random() * 0.014;
-    const open = price;
-    const close = open * (1 + drift + (Math.random() - 0.48) * vol);
-    const high = Math.max(open, close) * (1 + Math.random() * 0.006);
-    const low  = Math.min(open, close) * (1 - Math.random() * 0.006);
-    const volume = Math.round((3_000_000 + Math.random() * 25_000_000));
+    const volatility = 0.010 + rng() * 0.012;
+    const drift      = (rng() - 0.47) * 0.002;
+    const open       = price;
+    const close      = open * (1 + drift + (rng() - 0.5) * volatility);
+    const high       = Math.max(open, close) * (1 + rng() * 0.005);
+    const low        = Math.min(open, close) * (1 - rng() * 0.005);
+    const volume     = Math.round(2_000_000 + rng() * 28_000_000);
 
     let label = '';
-    const now = new Date('2026-05-26');
+
     if (range === '1D') {
-      const minutesOpen = 9 * 60 + 30 + i * 5;
-      const hh = Math.floor(minutesOpen / 60);
-      const mm = minutesOpen % 60;
-      label = `${hh}:${mm.toString().padStart(2, '0')}`;
+      const minutesOffset = i * 5;
+      const d = new Date('2026-05-26T09:30:00');
+      d.setMinutes(d.getMinutes() + minutesOffset);
+      const hh = d.getHours();
+      const mm = d.getMinutes();
+      const period = hh < 12 ? 'AM' : 'PM';
+      const displayH = hh > 12 ? hh - 12 : hh;
+      label = `${displayH}:${mm.toString().padStart(2, '0')} ${period}`;
     } else if (range === '1W') {
-      const d = new Date(now);
-      d.setHours(now.getHours() - (n - i));
-      label = d.toLocaleString('en-US', { weekday: 'short', hour: 'numeric' });
+      const d = new Date(refDate);
+      d.setHours(refDate.getHours() - (n - 1 - i) * 2);
+      label = d.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', hour12: true });
     } else {
-      const d = new Date(now);
-      d.setDate(now.getDate() - (n - i));
+      const d = new Date(refDate);
+      d.setDate(refDate.getDate() - (n - 1 - i));
       if (range === '1Y' || range === 'All') {
         label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       } else {
@@ -108,7 +131,8 @@ function generateOHLCV(ticker: string, range: TimeRange): OHLCVBar[] {
   return data;
 }
 
-// Compute RSI
+// ── Compute RSI ────────────────────────────────────────────────
+
 function computeRSI(closes: number[], period = 14): number[] {
   const rsi: number[] = new Array(closes.length).fill(50);
   if (closes.length < period + 1) return rsi;
@@ -122,20 +146,22 @@ function computeRSI(closes: number[], period = 14): number[] {
   rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   for (let i = period + 1; i < closes.length; i++) {
     const change = closes[i] - closes[i - 1];
-    const gain = change >= 0 ? change : 0;
-    const loss = change < 0  ? Math.abs(change) : 0;
+    const gain   = change >= 0 ? change : 0;
+    const loss   = change < 0  ? Math.abs(change) : 0;
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
-    rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    rsi[i]  = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
   }
   return rsi;
 }
 
-// Compute EMA
+// ── Compute EMA ────────────────────────────────────────────────
+
 function ema(values: number[], period: number): (number | null)[] {
-  const k = 2 / (period + 1);
+  if (values.length < period) return values.map(() => null);
+  const k      = 2 / (period + 1);
   const result: (number | null)[] = new Array(period - 1).fill(null);
-  let prev = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  let prev     = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
   result.push(prev);
   for (let i = period; i < values.length; i++) {
     prev = values[i] * k + prev * (1 - k);
@@ -144,15 +170,22 @@ function ema(values: number[], period: number): (number | null)[] {
   return result;
 }
 
-function computeMACD(closes: number[]): { macd: (number | null)[]; signal: (number | null)[]; hist: (number | null)[] } {
+// ── Compute MACD ───────────────────────────────────────────────
+
+function computeMACD(closes: number[]): {
+  macd:   (number | null)[];
+  signal: (number | null)[];
+  hist:   (number | null)[];
+} {
   const ema12 = ema(closes, 12);
   const ema26 = ema(closes, 26);
   const macd  = closes.map((_, i) => {
     if (ema12[i] == null || ema26[i] == null) return null;
     return (ema12[i] as number) - (ema26[i] as number);
   });
-  const macdValues = macd.filter((v) => v !== null) as number[];
-  const sigRaw = ema(macdValues, 9);
+
+  const macdValues = macd.filter((v): v is number => v !== null);
+  const sigRaw     = ema(macdValues, 9);
   const signal: (number | null)[] = new Array(closes.length).fill(null);
   let sigIdx = 0;
   for (let i = 0; i < closes.length; i++) {
@@ -161,46 +194,58 @@ function computeMACD(closes: number[]): { macd: (number | null)[]; signal: (numb
       sigIdx++;
     }
   }
+
   const hist = closes.map((_, i) =>
-    macd[i] !== null && signal[i] !== null ? (macd[i] as number) - (signal[i] as number) : null
+    macd[i] !== null && signal[i] !== null
+      ? (macd[i] as number) - (signal[i] as number)
+      : null
   );
   return { macd, signal, hist };
 }
 
-// ── Custom candlestick bar ─────────────────────────────────────
+// ── Custom Candlestick Shape ───────────────────────────────────
+// Used as shape prop on a <Bar> inside ComposedChart.
+// recharts passes x, y, width, height and a background; we ignore
+// the bar geometry and draw the candle using payload values + the
+// chart's numeric y-axis range (yAxis.domain propagated via chartLayout).
 
-function CandlestickBar(props: {
-  x?: number; y?: number; width?: number; height?: number;
-  payload?: OHLCVBar; yScale?: (v: number) => number;
-  chartHeight?: number;
-}) {
-  const { x = 0, width = 8, payload, yScale, chartHeight = 300 } = props;
-  if (!payload || !yScale) return null;
+interface CandleProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  payload?: OHLCVBar;
+  // recharts internal props injected when used as shape
+  background?: { x: number; y: number; width: number; height: number };
+  yAxisMap?: Record<string, { scale: (v: number) => number }>;
+}
+
+function CandleShape(props: CandleProps & { yScale: (v: number) => number }) {
+  const { x = 0, width = 8, payload, yScale } = props;
+  if (!payload) return null;
 
   const { open, high, low, close } = payload;
-  const isGain = close >= open;
-  const color = isGain ? '#3d9e6e' : '#c0453a';
-
-  const yHigh  = yScale(high);
-  const yLow   = yScale(low);
-  const yOpen  = yScale(open);
-  const yClose = yScale(close);
+  const isGain  = close >= open;
+  const color   = isGain ? '#3d9e6e' : '#c0453a';
+  const yHigh   = yScale(high);
+  const yLow    = yScale(low);
+  const yOpen   = yScale(open);
+  const yClose  = yScale(close);
   const bodyTop = Math.min(yOpen, yClose);
   const bodyH   = Math.max(Math.abs(yClose - yOpen), 1);
-  const centerX = x + width / 2;
+  const cx      = x + width / 2;
+  const bw      = Math.max(width - 2, 1);
 
   return (
     <g>
-      {/* Wick */}
-      <line x1={centerX} y1={yHigh} x2={centerX} y2={yLow} stroke={color} strokeWidth={1} />
-      {/* Body */}
+      <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
       <rect
-        x={x + 1}
+        x={cx - bw / 2}
         y={bodyTop}
-        width={Math.max(width - 2, 1)}
+        width={bw}
         height={bodyH}
-        fill={isGain ? color : color}
-        fillOpacity={isGain ? 0.85 : 1}
+        fill={color}
+        fillOpacity={isGain ? 0.8 : 1}
         stroke={color}
         strokeWidth={0.5}
       />
@@ -208,28 +253,44 @@ function CandlestickBar(props: {
   );
 }
 
-// ── Custom tooltip ─────────────────────────────────────────────
+// ── Custom Tooltip ─────────────────────────────────────────────
 
-function CandleTooltip({ active, payload }: { active?: boolean; payload?: { payload: OHLCVBar }[] }) {
+interface TooltipPayloadItem {
+  payload: OHLCVBar;
+}
+
+function CandleTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: TooltipPayloadItem[];
+}) {
   if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
+  const d      = payload[0].payload;
   const isGain = d.close >= d.open;
-  const chg = d.close - d.open;
+  const chg    = d.close - d.open;
   const chgPct = (chg / d.open) * 100;
+
   return (
-    <div className="bg-surface-2 border border-border rounded-lg p-3 shadow-surface-lg text-xs">
+    <div className="bg-surface-2 border border-border rounded-lg p-3 shadow-surface-lg text-xs min-w-[140px]">
       <div className="text-off-white/50 mb-2 font-mono">{d.time}</div>
       <div className="space-y-1">
-        {[['O', d.open], ['H', d.high], ['L', d.low], ['C', d.close]].map(([label, val]) => (
-          <div key={label as string} className="flex gap-3 justify-between">
-            <span className="text-off-white/40">{label}</span>
-            <span className="font-mono tabular-nums text-off-white">{formatCurrency(val as number)}</span>
-          </div>
-        ))}
+        {([['O', d.open], ['H', d.high], ['L', d.low], ['C', d.close]] as [string, number][]).map(
+          ([label, val]) => (
+            <div key={label} className="flex gap-3 justify-between">
+              <span className="text-off-white/40">{label}</span>
+              <span className="font-mono tabular-nums text-off-white">{formatCurrency(val)}</span>
+            </div>
+          )
+        )}
         <div className="border-t border-border pt-1 mt-1 flex gap-3 justify-between">
           <span className="text-off-white/40">Chg</span>
-          <span className={`font-mono tabular-nums font-semibold ${isGain ? 'text-gain' : 'text-loss'}`}>
-            {isGain ? '+' : ''}{chgPct.toFixed(2)}%
+          <span
+            className={`font-mono tabular-nums font-semibold ${isGain ? 'text-gain' : 'text-loss'}`}
+          >
+            {isGain ? '+' : ''}
+            {chgPct.toFixed(2)}%
           </span>
         </div>
         <div className="flex gap-3 justify-between">
@@ -243,54 +304,95 @@ function CandleTooltip({ active, payload }: { active?: boolean; payload?: { payl
   );
 }
 
-// ── Charts Page ───────────────────────────────────────────────
+// ── Indicator type ─────────────────────────────────────────────
+
+type Indicator = 'RSI' | 'MACD' | 'MA';
+
+const INDICATOR_CONFIG: { id: Indicator; label: string; color: string }[] = [
+  { id: 'RSI',  label: 'RSI',  color: '#60a5fa' },
+  { id: 'MACD', label: 'MACD', color: '#34d399' },
+  { id: 'MA',   label: 'MA',   color: '#c9a84c' },
+];
 
 const TIMEFRAMES: TimeRange[] = ['1D', '1W', '1M', '3M', '1Y', 'All'];
 
+// ── Charts Page ───────────────────────────────────────────────
+
 export default function Charts() {
   const { setSelectedTicker } = useTrading();
-  const [ticker, setTicker]         = useState('AAPL');
-  const [searchInput, setSearchInput] = useState('AAPL');
-  const [timeframe, setTimeframe]   = useState<TimeRange>('3M');
-  const [activeIndicators, setActiveIndicators] = useState<Set<string>>(new Set(['MA20', 'MA50', 'RSI', 'MACD']));
+  const [ticker, setTicker]               = useState('AAPL');
+  const [searchInput, setSearchInput]     = useState('AAPL');
+  const [timeframe, setTimeframe]         = useState<TimeRange>('3M');
+  const [activeIndicators, setActiveIndicators] = useState<Set<Indicator>>(new Set(['MA']));
+
+  // Track chart container dimensions for the SVG candlestick overlay
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [chartRect, setChartRect]         = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    const el = chartContainerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => setChartRect(el.getBoundingClientRect()));
+    obs.observe(el);
+    setChartRect(el.getBoundingClientRect());
+    return () => obs.disconnect();
+  }, []);
 
   const tickerInfo = TICKER_BASE[ticker.toUpperCase()] ?? { price: 150, name: ticker };
 
-  const ohlcv = useMemo(() => generateOHLCV(ticker.toUpperCase(), timeframe), [ticker, timeframe]);
+  const ohlcv = useMemo(
+    () => generateOHLCV(ticker.toUpperCase(), timeframe),
+    [ticker, timeframe]
+  );
 
-  const closes = useMemo(() => ohlcv.map((d) => d.close), [ohlcv]);
-  const rsiValues = useMemo(() => computeRSI(closes), [closes]);
-  const macdData  = useMemo(() => computeMACD(closes), [closes]);
-
-  const priceData = useMemo(() => {
-    const step = Math.max(1, Math.floor(ohlcv.length / 80));
+  // Thin out bars for display when there are too many (keep chart readable)
+  const displayData = useMemo(() => {
+    if (ohlcv.length <= 120) return ohlcv;
+    const step = Math.ceil(ohlcv.length / 120);
     return ohlcv.filter((_, i) => i % step === 0 || i === ohlcv.length - 1);
   }, [ohlcv]);
 
-  const rsiChartData = useMemo(() =>
-    priceData.map((bar, i) => {
-      const origIdx = ohlcv.indexOf(bar);
-      return { time: bar.time, rsi: Math.round(rsiValues[origIdx] * 10) / 10 };
-    }), [priceData, ohlcv, rsiValues]);
+  const closes     = useMemo(() => displayData.map((d) => d.close), [displayData]);
+  const rsiValues  = useMemo(() => computeRSI(closes), [closes]);
+  const macdResult = useMemo(() => computeMACD(closes), [closes]);
 
-  const macdChartData = useMemo(() =>
-    priceData.map((bar) => {
-      const origIdx = ohlcv.indexOf(bar);
-      return {
-        time: bar.time,
-        macd:   macdData.macd[origIdx],
-        signal: macdData.signal[origIdx],
-        hist:   macdData.hist[origIdx],
-      };
-    }), [priceData, ohlcv, macdData]);
+  const rsiChartData = useMemo(
+    () => displayData.map((bar, i) => ({ time: bar.time, rsi: Math.round(rsiValues[i] * 10) / 10 })),
+    [displayData, rsiValues]
+  );
+
+  const macdChartData = useMemo(
+    () =>
+      displayData.map((bar, i) => ({
+        time:   bar.time,
+        macd:   macdResult.macd[i],
+        signal: macdResult.signal[i],
+        hist:   macdResult.hist[i],
+      })),
+    [displayData, macdResult]
+  );
 
   const currentClose = ohlcv[ohlcv.length - 1]?.close ?? tickerInfo.price;
-  const firstClose   = ohlcv[0]?.open ?? currentClose;
-  const totalChg     = currentClose - firstClose;
-  const totalChgPct  = (totalChg / firstClose) * 100;
+  const firstOpen    = ohlcv[0]?.open ?? currentClose;
+  const totalChg     = currentClose - firstOpen;
+  const totalChgPct  = (totalChg / firstOpen) * 100;
   const isGain       = totalChg >= 0;
 
-  const toggleIndicator = useCallback((ind: string) => {
+  const priceMin = useMemo(
+    () => Math.min(...displayData.map((d) => d.low)) * 0.9975,
+    [displayData]
+  );
+  const priceMax = useMemo(
+    () => Math.max(...displayData.map((d) => d.high)) * 1.0025,
+    [displayData]
+  );
+
+  const volumeData = useMemo(
+    () => displayData.map((d) => ({ time: d.time, volume: d.volume, isGain: d.close >= d.open })),
+    [displayData]
+  );
+
+  const toggleIndicator = useCallback((ind: Indicator) => {
     setActiveIndicators((prev) => {
       const next = new Set(prev);
       if (next.has(ind)) next.delete(ind);
@@ -299,57 +401,79 @@ export default function Charts() {
     });
   }, []);
 
-  const handleTickerSearch = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    const t = searchInput.trim().toUpperCase();
-    if (t) {
-      setTicker(t);
-      setSelectedTicker(t);
-    }
-  }, [searchInput, setSelectedTicker]);
+  const handleTickerSearch = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      const t = searchInput.trim().toUpperCase();
+      if (t) {
+        setTicker(t);
+        setSelectedTicker(t);
+      }
+    },
+    [searchInput, setSelectedTicker]
+  );
 
-  // Price y-axis domain
-  const priceMin = useMemo(() => Math.min(...priceData.map((d) => d.low)) * 0.998, [priceData]);
-  const priceMax = useMemo(() => Math.max(...priceData.map((d) => d.high)) * 1.002, [priceData]);
+  const showMA   = activeIndicators.has('MA');
+  const showRSI  = activeIndicators.has('RSI');
+  const showMACD = activeIndicators.has('MACD');
 
-  // Volume data
-  const volumeData = useMemo(() =>
-    priceData.map((d) => ({ time: d.time, volume: d.volume, isGain: d.close >= d.open })),
-  [priceData]);
+  // Y-axis width — must match what recharts renders so overlay aligns
+  const Y_AXIS_WIDTH = 60;
+  const CHART_MARGIN = { top: 8, right: Y_AXIS_WIDTH, left: 8, bottom: 0 };
 
   return (
     <div className="min-h-screen bg-obsidian">
       <div className="max-w-[1440px] mx-auto px-6 py-8 space-y-5">
 
-        {/* ── Header / Search ─────────────────────────────────── */}
+        {/* ── Header / Search ────────────────────────────────── */}
         <div className="flex items-center gap-4 flex-wrap">
-          <form onSubmit={handleTickerSearch} className="relative flex-1 max-w-sm">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-off-white/30" />
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
-              placeholder="Search ticker…"
-              className="w-full pl-9 pr-4 py-2.5 bg-surface-2 border border-border rounded-lg text-sm text-off-white placeholder-off-white/25 focus:outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/30 font-mono transition-colors"
-            />
+          <form onSubmit={handleTickerSearch} className="flex items-center gap-2">
+            <div className="relative">
+              <Search
+                size={15}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-off-white/30 pointer-events-none"
+              />
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value.toUpperCase())}
+                placeholder="Search ticker…"
+                className="w-48 pl-9 pr-3 py-2.5 bg-surface-2 border border-border rounded-lg text-sm text-off-white placeholder-off-white/25 focus:outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 font-mono transition-colors"
+              />
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2.5 bg-gold text-obsidian rounded-lg text-sm font-semibold hover:bg-gold-light transition-colors"
+            >
+              Go
+            </button>
           </form>
-          <div className="flex items-baseline gap-3">
+
+          <div className="flex items-baseline gap-3 flex-wrap">
             <span className="font-mono text-xl font-bold text-gold">{ticker.toUpperCase()}</span>
-            <span className="text-off-white/50 text-sm">{tickerInfo.name}</span>
+            <span className="text-off-white/50 text-sm hidden sm:inline">{tickerInfo.name}</span>
             <span className="font-mono text-2xl font-semibold text-off-white tabular-nums">
               {formatCurrency(currentClose)}
             </span>
-            <span className={`text-sm font-mono font-semibold tabular-nums ${isGain ? 'text-gain' : 'text-loss'}`}>
-              {isGain ? '+' : ''}{totalChg.toFixed(2)} ({isGain ? '+' : ''}{totalChgPct.toFixed(2)}%)
+            <span
+              className={`text-sm font-mono font-semibold tabular-nums flex items-center gap-1 ${
+                isGain ? 'text-gain' : 'text-loss'
+              }`}
+            >
+              {isGain ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+              {isGain ? '+' : ''}
+              {totalChg.toFixed(2)} ({isGain ? '+' : ''}
+              {totalChgPct.toFixed(2)}%)
             </span>
           </div>
-          {/* Timeframe buttons */}
+
+          {/* Timeframe selector */}
           <div className="flex items-center gap-1 bg-surface-2 border border-border rounded-lg p-1 ml-auto">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all duration-150 ${
                   timeframe === tf
                     ? 'bg-gold text-obsidian shadow-gold'
                     : 'text-off-white/50 hover:text-off-white hover:bg-surface-3'
@@ -361,31 +485,25 @@ export default function Charts() {
           </div>
         </div>
 
-        {/* ── Indicator Toggles ────────────────────────────────── */}
+        {/* ── Indicator Toggles ───────────────────────────────── */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-off-white/30 mr-1">Indicators:</span>
-          {[
-            { id: 'MA20',  label: '20 MA',  color: '#e8c96e' },
-            { id: 'MA50',  label: '50 MA',  color: '#a78bfa' },
-            { id: 'MA200', label: '200 MA', color: '#f97316' },
-            { id: 'RSI',   label: 'RSI',    color: '#60a5fa' },
-            { id: 'MACD',  label: 'MACD',   color: '#34d399' },
-          ].map(({ id, label, color }) => {
+          <span className="text-xs text-off-white/30 uppercase tracking-wider mr-1">Indicators</span>
+          {INDICATOR_CONFIG.map(({ id, label, color }) => {
             const active = activeIndicators.has(id);
             return (
               <button
                 key={id}
                 onClick={() => toggleIndicator(id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium transition-all duration-150 ${
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md border text-xs font-semibold transition-all duration-150 ${
                   active
                     ? 'border-transparent text-obsidian'
-                    : 'bg-transparent border-border text-off-white/40 hover:text-off-white hover:border-border'
+                    : 'bg-transparent border-border text-off-white/40 hover:text-off-white hover:border-off-white/20'
                 }`}
                 style={active ? { backgroundColor: color } : {}}
               >
                 <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: active ? 'rgba(0,0,0,0.4)' : color }}
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: active ? 'rgba(0,0,0,0.35)' : color, opacity: active ? 1 : 0.7 }}
                 />
                 {label}
               </button>
@@ -393,322 +511,402 @@ export default function Charts() {
           })}
         </div>
 
-        {/* ── Main Price Chart ─────────────────────────────────── */}
+        {/* ── Main Price Chart ────────────────────────────────── */}
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
             <BarChart2 size={14} className="text-gold" />
-            <span className="text-sm font-medium text-off-white/60">Price</span>
-            <span className="text-xs text-off-white/30 ml-auto">{timeframe} · OHLC</span>
+            <span className="text-sm font-medium text-off-white/60">Price Chart</span>
+            <span className="text-xs text-off-white/30 ml-auto font-mono">
+              {timeframe} · OHLC · {displayData.length} bars
+            </span>
           </div>
-          <ResponsiveContainer width="100%" height={320}>
-            <ComposedChart data={priceData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
-              <XAxis
-                dataKey="time"
-                tick={{ fill: '#4a4540', fontSize: 10, fontFamily: 'JetBrains Mono' }}
-                tickLine={false}
-                axisLine={{ stroke: '#2a2a2a' }}
-                interval={Math.floor(priceData.length / 8)}
-              />
-              <YAxis
-                domain={[priceMin, priceMax]}
-                tick={{ fill: '#4a4540', fontSize: 10, fontFamily: 'JetBrains Mono' }}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(v) => `$${v.toFixed(0)}`}
-                width={56}
-                orientation="right"
-              />
-              <Tooltip content={<CandleTooltip />} />
 
-              {/* Candlestick bars */}
-              <Bar
-                dataKey="high"
-                shape={(props: {
-                  x?: number; y?: number; width?: number; height?: number;
-                  payload?: OHLCVBar;
-                }) => {
-                  if (!props.payload) return <g />;
-                  // We need to access the yAxis scale — use a workaround via the chart context
-                  return <g />;
-                }}
-                fill="transparent"
-                stroke="transparent"
-              />
-
-              {/* Moving Averages */}
-              {activeIndicators.has('MA20') && (
-                <Line
-                  type="monotone"
-                  dataKey="ma20"
-                  stroke="#e8c96e"
-                  strokeWidth={1.5}
-                  dot={false}
-                  connectNulls
-                  name="MA20"
-                />
+          {/* MA legend */}
+          {showMA && (
+            <div className="flex items-center gap-4 mb-2 text-xs flex-wrap">
+              {displayData.some((d) => d.ma20 != null) && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-4 h-0.5 bg-gold inline-block rounded" />
+                  <span className="text-off-white/40">20 MA</span>
+                </span>
               )}
-              {activeIndicators.has('MA50') && (
-                <Line
-                  type="monotone"
-                  dataKey="ma50"
-                  stroke="#a78bfa"
-                  strokeWidth={1.5}
-                  dot={false}
-                  connectNulls
-                  name="MA50"
-                />
+              {displayData.some((d) => d.ma50 != null) && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-4 h-0.5 inline-block rounded" style={{ background: '#818cf8' }} />
+                  <span className="text-off-white/40">50 MA</span>
+                </span>
               )}
-              {activeIndicators.has('MA200') && (
-                <Line
-                  type="monotone"
-                  dataKey="ma200"
-                  stroke="#f97316"
-                  strokeWidth={1.5}
-                  dot={false}
-                  connectNulls
-                  name="MA200"
-                />
+              {displayData.some((d) => d.ma200 != null) && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-4 h-0.5 inline-block rounded" style={{ background: '#c084fc' }} />
+                  <span className="text-off-white/40">200 MA</span>
+                </span>
               )}
+            </div>
+          )}
 
-              {/* Close price line as main chart when MA only */}
-              <Line
-                type="monotone"
-                dataKey="close"
-                stroke={isGain ? '#3d9e6e' : '#c0453a'}
-                strokeWidth={2}
-                dot={false}
-                name="Close"
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
+          {/* Chart wrapper — position relative so SVG overlay can be placed on top */}
+          <div ref={chartContainerRef} className="relative" style={{ height: 320 }}>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={displayData} margin={CHART_MARGIN}>
+                <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="time"
+                  tick={{ fill: '#5a5450', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+                  tickLine={false}
+                  axisLine={{ stroke: '#2a2a2a' }}
+                  interval={Math.max(Math.floor(displayData.length / 7) - 1, 0)}
+                />
+                <YAxis
+                  domain={[priceMin, priceMax]}
+                  tick={{ fill: '#5a5450', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(v: number) => `$${v.toFixed(0)}`}
+                  width={Y_AXIS_WIDTH}
+                  orientation="right"
+                />
+                <Tooltip content={<CandleTooltip />} />
 
-          {/* Candlestick SVG overlay */}
-          <CandlestickOverlay data={priceData} priceMin={priceMin} priceMax={priceMax} />
+                {/* Invisible bar just to register the data shape for recharts */}
+                <Bar dataKey="close" fill="transparent" stroke="transparent" maxBarSize={0} />
+
+                {/* Moving Averages — only when MA indicator active */}
+                {showMA && (
+                  <Line
+                    type="monotone"
+                    dataKey="ma20"
+                    stroke="#c9a84c"
+                    strokeWidth={1.5}
+                    dot={false}
+                    connectNulls
+                    name="MA20"
+                  />
+                )}
+                {showMA && (
+                  <Line
+                    type="monotone"
+                    dataKey="ma50"
+                    stroke="#818cf8"
+                    strokeWidth={1.5}
+                    dot={false}
+                    connectNulls
+                    name="MA50"
+                  />
+                )}
+                {showMA && (
+                  <Line
+                    type="monotone"
+                    dataKey="ma200"
+                    stroke="#c084fc"
+                    strokeWidth={1.5}
+                    dot={false}
+                    connectNulls
+                    name="MA200"
+                  />
+                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+
+            {/* SVG Candlestick overlay */}
+            <CandlestickSVGOverlay
+              data={displayData}
+              priceMin={priceMin}
+              priceMax={priceMax}
+              chartHeight={320}
+              yAxisWidth={Y_AXIS_WIDTH}
+              margin={CHART_MARGIN}
+            />
+          </div>
         </div>
 
-        {/* ── Volume Chart ─────────────────────────────────────── */}
+        {/* ── Volume Chart ────────────────────────────────────── */}
         <div className="card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Activity size={14} className="text-off-white/40" />
             <span className="text-sm font-medium text-off-white/60">Volume</span>
           </div>
-          <ResponsiveContainer width="100%" height={80}>
-            <ComposedChart data={volumeData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={90}>
+            <BarChart data={volumeData} margin={{ top: 4, right: Y_AXIS_WIDTH, left: 8, bottom: 0 }}>
               <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="time" hide />
               <YAxis
-                tick={{ fill: '#4a4540', fontSize: 9, fontFamily: 'JetBrains Mono' }}
+                tick={{ fill: '#5a5450', fontSize: 9, fontFamily: 'JetBrains Mono' }}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={(v) => `${(v / 1_000_000).toFixed(0)}M`}
-                width={40}
+                tickFormatter={(v: number) => `${(v / 1_000_000).toFixed(0)}M`}
+                width={Y_AXIS_WIDTH}
                 orientation="right"
               />
               <Tooltip
-                contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }}
+                contentStyle={{
+                  background: '#1a1a1a',
+                  border: '1px solid #2a2a2a',
+                  borderRadius: 8,
+                  fontSize: 11,
+                }}
                 labelStyle={{ color: '#a09a8e', fontSize: 10 }}
                 formatter={(v: number) => [`${(v / 1_000_000).toFixed(2)}M`, 'Volume']}
               />
-              <Bar dataKey="volume" maxBarSize={6}>
+              <Bar dataKey="volume" maxBarSize={8} radius={[1, 1, 0, 0]}>
                 {volumeData.map((entry, idx) => (
                   <Cell
                     key={idx}
-                    fill={entry.isGain ? '#3d9e6e' : '#c0453a'}
-                    fillOpacity={0.6}
+                    fill={entry.isGain ? '#c9a84c' : '#c9a84c'}
+                    fillOpacity={0.55}
                   />
                 ))}
               </Bar>
-            </ComposedChart>
+            </BarChart>
           </ResponsiveContainer>
         </div>
 
-        {/* ── Technical Indicators ─────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-5">
-
-          {/* RSI */}
-          {activeIndicators.has('RSI') && (
-            <div className="card p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <TrendingUp size={13} className="text-blue-400" />
-                  <span className="text-sm font-medium text-off-white/60">RSI (14)</span>
+        {/* ── Technical Indicators ────────────────────────────── */}
+        {(showRSI || showMACD) && (
+          <div
+            className={`grid gap-5 ${showRSI && showMACD ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}
+          >
+            {/* RSI */}
+            {showRSI && (
+              <div className="card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={13} className="text-blue-400" />
+                    <span className="text-sm font-medium text-off-white/60">RSI (14)</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="text-loss/70">Overbought &gt; 70</span>
+                    <span className="text-gain/70">Oversold &lt; 30</span>
+                    <span className="font-mono text-blue-400 font-semibold">
+                      {rsiChartData[rsiChartData.length - 1]?.rsi.toFixed(1)}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="text-loss/70">Overbought &gt;70</span>
-                  <span className="text-gain/70">Oversold &lt;30</span>
-                  <span className="font-mono text-blue-400 font-semibold">
-                    {rsiChartData[rsiChartData.length - 1]?.rsi.toFixed(1)}
-                  </span>
-                </div>
+                <ResponsiveContainer width="100%" height={130}>
+                  <ComposedChart
+                    data={rsiChartData}
+                    margin={{ top: 4, right: Y_AXIS_WIDTH, left: 8, bottom: 0 }}
+                  >
+                    <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="time" hide />
+                    <YAxis
+                      domain={[0, 100]}
+                      tick={{ fill: '#5a5450', fontSize: 9 }}
+                      tickLine={false}
+                      axisLine={false}
+                      ticks={[0, 30, 50, 70, 100]}
+                      width={Y_AXIS_WIDTH}
+                      orientation="right"
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: '#1a1a1a',
+                        border: '1px solid #2a2a2a',
+                        borderRadius: 8,
+                      }}
+                      formatter={(v: number) => [v.toFixed(1), 'RSI']}
+                    />
+                    {/* Shaded zones */}
+                    <ReferenceLine
+                      y={70}
+                      stroke="#c0453a"
+                      strokeDasharray="4 3"
+                      strokeOpacity={0.6}
+                      label={{ value: '70', position: 'right', fill: '#c0453a', fontSize: 9 }}
+                    />
+                    <ReferenceLine
+                      y={30}
+                      stroke="#3d9e6e"
+                      strokeDasharray="4 3"
+                      strokeOpacity={0.6}
+                      label={{ value: '30', position: 'right', fill: '#3d9e6e', fontSize: 9 }}
+                    />
+                    <ReferenceLine y={50} stroke="#2a2a2a" strokeDasharray="2 4" />
+                    <Line
+                      type="monotone"
+                      dataKey="rsi"
+                      stroke="#60a5fa"
+                      strokeWidth={1.5}
+                      dot={false}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
               </div>
-              <ResponsiveContainer width="100%" height={120}>
-                <ComposedChart data={rsiChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="time" hide />
-                  <YAxis
-                    domain={[0, 100]}
-                    tick={{ fill: '#4a4540', fontSize: 9 }}
-                    tickLine={false}
-                    axisLine={false}
-                    ticks={[0, 30, 50, 70, 100]}
-                    width={28}
-                    orientation="right"
-                  />
-                  <Tooltip
-                    contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }}
-                    formatter={(v: number) => [v.toFixed(1), 'RSI']}
-                  />
-                  {/* Overbought zone */}
-                  <ReferenceLine y={70} stroke="#c0453a" strokeDasharray="4 3" strokeOpacity={0.5} />
-                  {/* Oversold zone */}
-                  <ReferenceLine y={30} stroke="#3d9e6e" strokeDasharray="4 3" strokeOpacity={0.5} />
-                  {/* Midline */}
-                  <ReferenceLine y={50} stroke="#2a2a2a" strokeDasharray="2 4" />
-                  <Line
-                    type="monotone"
-                    dataKey="rsi"
-                    stroke="#60a5fa"
-                    strokeWidth={1.5}
-                    dot={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+            )}
 
-          {/* MACD */}
-          {activeIndicators.has('MACD') && (
-            <div className="card p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Activity size={13} className="text-emerald-400" />
-                  <span className="text-sm font-medium text-off-white/60">MACD (12, 26, 9)</span>
+            {/* MACD */}
+            {showMACD && (
+              <div className="card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Activity size={13} className="text-emerald-400" />
+                    <span className="text-sm font-medium text-off-white/60">MACD (12, 26, 9)</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" />
+                      <span className="text-off-white/40">MACD</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-0.5 bg-orange-400 inline-block rounded" />
+                      <span className="text-off-white/40">Signal</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 inline-block rounded-sm" style={{ background: '#3d9e6e', opacity: 0.7 }} />
+                      <span className="text-off-white/40">Hist</span>
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-0.5 bg-emerald-400 inline-block" /> MACD
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="w-2 h-0.5 bg-orange-400 inline-block" /> Signal
-                  </span>
-                </div>
+                <ResponsiveContainer width="100%" height={130}>
+                  <ComposedChart
+                    data={macdChartData}
+                    margin={{ top: 4, right: Y_AXIS_WIDTH, left: 8, bottom: 0 }}
+                  >
+                    <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="time" hide />
+                    <YAxis
+                      tick={{ fill: '#5a5450', fontSize: 9 }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v: number) => v.toFixed(1)}
+                      width={Y_AXIS_WIDTH}
+                      orientation="right"
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: '#1a1a1a',
+                        border: '1px solid #2a2a2a',
+                        borderRadius: 8,
+                      }}
+                      formatter={(v: number | null) => [
+                        v != null ? v.toFixed(3) : '—',
+                        '',
+                      ]}
+                    />
+                    <ReferenceLine y={0} stroke="#2a2a2a" />
+                    <Bar dataKey="hist" maxBarSize={5}>
+                      {macdChartData.map((entry, idx) => (
+                        <Cell
+                          key={idx}
+                          fill={(entry.hist ?? 0) >= 0 ? '#3d9e6e' : '#c0453a'}
+                          fillOpacity={0.7}
+                        />
+                      ))}
+                    </Bar>
+                    <Line
+                      type="monotone"
+                      dataKey="macd"
+                      stroke="#34d399"
+                      strokeWidth={1.5}
+                      dot={false}
+                      connectNulls
+                      name="MACD"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="signal"
+                      stroke="#f97316"
+                      strokeWidth={1.5}
+                      dot={false}
+                      connectNulls
+                      name="Signal"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
               </div>
-              <ResponsiveContainer width="100%" height={120}>
-                <ComposedChart data={macdChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="time" hide />
-                  <YAxis
-                    tick={{ fill: '#4a4540', fontSize: 9 }}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => v.toFixed(1)}
-                    width={36}
-                    orientation="right"
-                  />
-                  <Tooltip
-                    contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }}
-                    formatter={(v: number | null) => [v != null ? v.toFixed(3) : '—', '']}
-                  />
-                  <ReferenceLine y={0} stroke="#2a2a2a" />
-                  <Bar dataKey="hist" maxBarSize={4}>
-                    {macdChartData.map((entry, idx) => (
-                      <Cell
-                        key={idx}
-                        fill={(entry.hist ?? 0) >= 0 ? '#3d9e6e' : '#c0453a'}
-                        fillOpacity={0.7}
-                      />
-                    ))}
-                  </Bar>
-                  <Line
-                    type="monotone"
-                    dataKey="macd"
-                    stroke="#34d399"
-                    strokeWidth={1.5}
-                    dot={false}
-                    connectNulls
-                    name="MACD"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="signal"
-                    stroke="#f97316"
-                    strokeWidth={1.5}
-                    dot={false}
-                    connectNulls
-                    name="Signal"
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Candlestick SVG overlay ────────────────────────────────────
-// Renders a true OHLC candlestick chart in SVG over a given price range
+// ── Candlestick SVG Overlay ────────────────────────────────────
+// Renders real OHLC candles as an absolutely positioned SVG that
+// sits on top of the recharts ComposedChart, sharing the same
+// coordinate space by matching margins and axis widths exactly.
 
-function CandlestickOverlay({ data, priceMin, priceMax }: {
-  data: OHLCVBar[];
-  priceMin: number;
-  priceMax: number;
-}) {
-  const W = 100; // percentage width per bar slot
-  const H = 320;
-  const PAD_LEFT = 0;
-  const PAD_RIGHT = 56; // matches YAxis width
-  const PAD_TOP = 8;
-  const PAD_BOTTOM = 30;
+interface CandlestickSVGOverlayProps {
+  data:        OHLCVBar[];
+  priceMin:    number;
+  priceMax:    number;
+  chartHeight: number;
+  yAxisWidth:  number;
+  margin:      { top: number; right: number; left: number; bottom: number };
+}
 
-  const chartH = H - PAD_TOP - PAD_BOTTOM;
-  const priceRange = priceMax - priceMin || 1;
-
-  const scaleY = (price: number) =>
-    PAD_TOP + chartH - ((price - priceMin) / priceRange) * chartH;
-
+function CandlestickSVGOverlay({
+  data,
+  priceMin,
+  priceMax,
+  chartHeight,
+  yAxisWidth,
+  margin,
+}: CandlestickSVGOverlayProps) {
   const n = data.length;
   if (n === 0) return null;
 
+  const PAD_TOP    = margin.top;
+  const PAD_BOTTOM = 30; // recharts default x-axis height
+  const PAD_LEFT   = margin.left;
+  // We leave right space for the y-axis; the SVG itself doesn't render there
+  const plotH  = chartHeight - PAD_TOP - PAD_BOTTOM;
+  const priceRange = priceMax - priceMin || 1;
+
+  const scaleY = (price: number) =>
+    PAD_TOP + plotH - ((price - priceMin) / priceRange) * plotH;
+
+  // viewBox x is 0..1000 for the plot area (excluding y-axis gutter)
+  const VW = 1000;
+
   return (
     <div
-      className="absolute inset-0 pointer-events-none overflow-hidden"
-      style={{ marginRight: `${PAD_RIGHT}px` }}
+      className="absolute inset-0 pointer-events-none"
+      style={{ right: yAxisWidth }}
     >
       <svg
         width="100%"
-        height={H}
-        viewBox={`0 0 ${1000} ${H}`}
+        height={chartHeight}
+        viewBox={`0 0 ${VW} ${chartHeight}`}
         preserveAspectRatio="none"
-        className="block"
       >
         {data.map((bar, i) => {
-          const slotW = 1000 / n;
-          const x = i * slotW;
-          const barW = Math.max(slotW * 0.6, 1);
-          const cx = x + slotW / 2;
-          const isGain = bar.close >= bar.open;
-          const color = isGain ? '#3d9e6e' : '#c0453a';
-          const yHigh  = scaleY(bar.high);
-          const yLow   = scaleY(bar.low);
-          const yOpen  = scaleY(bar.open);
-          const yClose = scaleY(bar.close);
+          const slotW  = VW / n;
+          const x      = PAD_LEFT / (1 - yAxisWidth / 1000) + i * slotW;
+          // Center of bar slot in viewBox coords
+          const slotX  = i * slotW;
+          const cx     = slotX + slotW / 2;
+          const barW   = Math.max(slotW * 0.65, 1);
+
+          const isGain  = bar.close >= bar.open;
+          const color   = isGain ? '#3d9e6e' : '#c0453a';
+          const yHigh   = scaleY(bar.high);
+          const yLow    = scaleY(bar.low);
+          const yOpen   = scaleY(bar.open);
+          const yClose  = scaleY(bar.close);
           const bodyTop = Math.min(yOpen, yClose);
           const bodyH   = Math.max(Math.abs(yClose - yOpen), 1);
 
           return (
             <g key={i}>
-              <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
+              {/* Wick — thin line from high to low */}
+              <line
+                x1={cx}
+                y1={yHigh}
+                x2={cx}
+                y2={yLow}
+                stroke={color}
+                strokeWidth={1}
+              />
+              {/* Body — open to close */}
               <rect
                 x={cx - barW / 2}
                 y={bodyTop}
                 width={barW}
                 height={bodyH}
-                fill={isGain ? color : color}
-                fillOpacity={isGain ? 0.85 : 1}
+                fill={color}
+                fillOpacity={isGain ? 0.75 : 1}
               />
             </g>
           );

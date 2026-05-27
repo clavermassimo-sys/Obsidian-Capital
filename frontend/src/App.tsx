@@ -15,6 +15,8 @@ const RegisterPage    = lazy(() => import('@/pages/Register'));
 const DashboardPage   = lazy(() => import('@/pages/Dashboard'));
 const MarketsPage     = lazy(() => import('@/pages/Markets'));
 const PrivatePage     = lazy(() => import('@/pages/Private'));
+const ChartsPage      = lazy(() => import('@/pages/Charts'));
+const ScreenerPage    = lazy(() => import('@/pages/Screener'));
 
 // ── Loading Fallback ──────────────────────────────────────────
 
@@ -104,10 +106,10 @@ export default function App() {
             </PrivateRoute>
           }
         />
-        {/* Stub routes for nav items not yet built — redirect to dashboard */}
-        <Route path="/charts"    element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+        {/* Charts and Screener pages */}
+        <Route path="/charts"    element={<PrivateRoute><ChartsPage /></PrivateRoute>} />
         <Route path="/orders"    element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-        <Route path="/screener"  element={<PrivateRoute><MarketsPage /></PrivateRoute>} />
+        <Route path="/screener"  element={<PrivateRoute><ScreenerPage /></PrivateRoute>} />
         <Route path="/watchlist" element={<PrivateRoute><MarketsPage /></PrivateRoute>} />
         <Route path="/settings"  element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
 
