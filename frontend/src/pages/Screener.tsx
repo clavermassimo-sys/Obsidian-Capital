@@ -153,6 +153,9 @@ export default function Screener() {
 
   const [savedScreens, setSavedScreens] = useState(SAVED_SCREENS_INITIAL);
 
+  // Mobile filter drawer
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+
   // "Save Screen" inline form
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [saveFormName, setSaveFormName] = useState('');
@@ -477,7 +480,7 @@ export default function Screener() {
               )}
             </button>
             <span className="text-xs text-off-white/40 ml-auto">
-              {sortedStocks.length} of {MOCK_STOCKS.length} stocks
+              {sortedStocks.length} of {allApiStocks.length} stocks
             </span>
           </div>
           {/* Sort chips — horizontal scroll */}
@@ -694,7 +697,7 @@ export default function Screener() {
                 Showing{' '}
                 <span className="text-off-white font-semibold">{sortedStocks.length}</span>
                 {' '}of{' '}
-                <span className="text-off-white font-semibold">{MOCK_STOCKS.length}</span>
+                <span className="text-off-white font-semibold">{allApiStocks.length}</span>
                 {' '}stocks
               </span>
 

@@ -86,7 +86,7 @@ interface TradingContextValue {
   watchlist: WatchlistItem[];
   selectedTicker: string | null;
   setSelectedTicker: (ticker: string | null) => void;
-  previewOrder: (req: OrderRequest, tier: CommissionTier) => OrderPreview;
+  previewOrder: (req: OrderRequest, tier: CommissionTier) => Promise<OrderPreview>;
   submitOrder: (req: OrderRequest, tier: CommissionTier) => Promise<Trade>;
   addToWatchlist: (item: WatchlistItem) => void;
   removeFromWatchlist: (ticker: string) => void;
@@ -185,7 +185,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
     },
     [holdings, watchlist]
-  ) as (req: OrderRequest, tier: CommissionTier) => OrderPreview;
+  );
 
   // ── Submit order ──────────────────────────────────────────
 
@@ -208,7 +208,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         orderResult = null;
       }
 
-      const preview = (previewOrder as any)(req, tier) as OrderPreview;
+      const preview = await previewOrder(req, tier);
       const price = parseFloat(orderResult?.filled_avg_price) || preview.estimatedPrice;
 
       const trade: Trade = {
@@ -249,7 +249,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         watchlist,
         selectedTicker,
         setSelectedTicker,
-        previewOrder: previewOrder as (req: OrderRequest, tier: CommissionTier) => OrderPreview,
+        previewOrder,
         submitOrder,
         addToWatchlist,
         removeFromWatchlist,

@@ -393,8 +393,7 @@ export default function PrivatePage() {
   const isPrivate = user?.tier === 'private';
 
   return (
-    <AppLayout>
-      <PageContent>
+    <PageContent>
         {/* ── Hero ──────────────────────────────────────── */}
         <div className="relative overflow-hidden rounded-2xl bg-surface border border-border p-10 sm:p-16 text-center">
           {/* Decorative background */}
@@ -510,7 +509,6 @@ export default function PrivatePage() {
             <ApplicationFormSection defaultName={user?.name ?? ''} />
           </div>
         )}
-      </PageContent>
-    </AppLayout>
+    </PageContent>
   );
 }

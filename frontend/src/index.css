@@ -310,8 +310,8 @@
   }
 
   /* ── Gain / Loss coloring ───────────────────────────── */
-  .text-gain { @apply text-gain; }
-  .text-loss { @apply text-loss; }
+  .text-gain { color: #3d9e6e; }
+  .text-loss { color: #c0453a; }
 
   /* ── Membership Tier Badges ─────────────────────────── */
   .tier-standard {

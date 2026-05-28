@@ -1209,8 +1209,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <AppLayout>
-      <PageContent>
+    <PageContent>
         <PageHeader
           title="Settings"
           subtitle="Manage your account, security, and preferences"
@@ -1244,7 +1243,6 @@ export default function SettingsPage() {
         <div className="bg-surface border border-border rounded-xl p-6 animate-fade-in">
           {renderTab()}
         </div>
-      </PageContent>
-    </AppLayout>
+    </PageContent>
   );
 }

@@ -830,7 +830,7 @@ export default function Charts() {
                     <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="time" hide />
                     <YAxis tick={{ fill: '#5a5450', fontSize: 9 }} tickLine={false} axisLine={false} tickFormatter={(v: number) => v.toFixed(1)} width={Y_AXIS_WIDTH} orientation="right" />
-                    <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }} formatter={(v: number | null) => [v != null ? v.toFixed(3) : '—', '']} />
+                    <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(3) : '—', '']} />
                     <ReferenceLine y={0} stroke="#2a2a2a" />
                     <Bar dataKey="hist" maxBarSize={5}>
                       {macdChartData.map((entry, idx) => (
