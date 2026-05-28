@@ -10,7 +10,7 @@ import {
   CandlestickChart,
   ClipboardList,
   SlidersHorizontal,
-  Star,
+  Lock,
   Settings,
   LogOut,
   ChevronRight,
@@ -95,7 +95,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Charts',     path: '/charts',     icon: CandlestickChart   },
   { label: 'Orders',     path: '/orders',     icon: ClipboardList      },
   { label: 'Screener',   path: '/screener',   icon: SlidersHorizontal  },
-  { label: 'Watchlist',  path: '/watchlist',  icon: Star               },
+  { label: 'Private',    path: '/private',    icon: Lock               },
   { label: 'Settings',   path: '/settings',   icon: Settings           },
 ];
 

@@ -1,13 +1,12 @@
 /* ============================================================
-   Obsidian Capital — OrderConfirmModal
-   Modal dialog shown before executing an order. Displays full
-   order summary, commission breakdown, regulatory disclosures,
-   and Confirm/Cancel actions.
+   Obsidian Capital — OrderConfirmModal (Updated)
+   Full order summary with Alpaca disclaimer, extended order info,
+   and Reg BI / risk disclosures.
    ============================================================ */
 
 import React, { useEffect, useRef } from 'react';
-import { X, ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
-import type { CommissionTier, OrderSide } from '@/types';
+import { X, ShieldCheck, AlertCircle, Loader2, Building2, Zap } from 'lucide-react';
+import type { CommissionTier, OrderSide, ExtendedOrderType, TimeInForce } from '@/types';
 import { CommissionCalculator } from './CommissionCalculator';
 import { getCommissionBreakdown } from '@/utils/commission';
 
@@ -23,22 +22,52 @@ interface OrderConfirmModalProps {
   shares: number;
   price: number;
   tier: CommissionTier;
+  orderType?: ExtendedOrderType;
+  timeInForce?: TimeInForce;
+  limitPrice?: number;
+  stopPrice?: number;
+  trailPct?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function formatCurrency(value: number): string {
+function fmt(value: number): string {
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    style: 'currency', currency: 'USD',
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(value);
 }
 
-function formatPercent(rate: number): string {
+function formatPct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
+
+function orderTypeLabel(ot: ExtendedOrderType): string {
+  const map: Record<ExtendedOrderType, string> = {
+    market: 'Market Order',
+    limit: 'Limit Order',
+    stop: 'Stop Order',
+    stop_limit: 'Stop-Limit Order',
+    trailing_stop: 'Trailing Stop Order',
+  };
+  return map[ot] ?? 'Market Order';
+}
+
+function tifLabel(tif: TimeInForce): string {
+  const map: Record<TimeInForce, string> = {
+    day: 'Day',
+    gtc: 'Good Till Cancelled',
+    ioc: 'Immediate or Cancel',
+    fok: 'Fill or Kill',
+  };
+  return map[tif] ?? 'Day';
+}
+
+const TIER_UPGRADE_SAVINGS: Record<CommissionTier, string | null> = {
+  standard: 'Upgrade to Member and save 2–3% on every trade.',
+  member: 'Upgrade to Private Client for the lowest 5–6% rate.',
+  private: null,
+};
 
 // ── Component ─────────────────────────────────────────────────
 
@@ -52,34 +81,30 @@ export function OrderConfirmModal({
   shares,
   price,
   tier,
+  orderType = 'market',
+  timeInForce = 'day',
+  limitPrice,
+  stopPrice,
+  trailPct,
 }: OrderConfirmModalProps) {
   const [isLoading, setIsLoading] = React.useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Lock body scroll when open
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
+    document.body.style.overflow = isOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
   }, [isOpen]);
 
-  // Close on Escape key
+  // Escape key
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen && !isLoading) {
-        onClose();
-      }
+      if (e.key === 'Escape' && isOpen && !isLoading) onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [isOpen, isLoading, onClose]);
 
-  // Reset loading when modal closes
   useEffect(() => {
     if (!isOpen) setIsLoading(false);
   }, [isOpen]);
@@ -88,12 +113,14 @@ export function OrderConfirmModal({
 
   const subtotal = shares * price;
   const breakdown = getCommissionBreakdown(subtotal, tier);
-  const commissionRate = formatPercent(breakdown.rate);
-
+  const commissionRate = formatPct(breakdown.rate);
   const isBuy = side === 'buy';
   const sideLabel = isBuy ? 'BUY' : 'SELL';
   const sideColor = isBuy ? '#c9a84c' : '#c0453a';
-  const sideBg = isBuy ? 'rgba(201,168,76,0.1)' : 'rgba(192,69,58,0.1)';
+  const sideBg = isBuy ? 'rgba(201,168,76,0.12)' : 'rgba(192,69,58,0.12)';
+  const upgradeTip = TIER_UPGRADE_SAVINGS[tier];
+
+  const displayTotal = isBuy ? breakdown.total : subtotal - breakdown.amount;
 
   async function handleConfirm() {
     setIsLoading(true);
@@ -105,16 +132,17 @@ export function OrderConfirmModal({
   }
 
   function handleOverlayClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (e.target === overlayRef.current && !isLoading) {
-      onClose();
-    }
+    if (e.target === overlayRef.current && !isLoading) onClose();
   }
+
+  // Estimated price for display
+  const estPrice = limitPrice ?? stopPrice ?? price;
 
   return (
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(0,0,0,0.75)' }}
+      style={{ backgroundColor: 'rgba(0,0,0,0.8)' }}
       onClick={handleOverlayClick}
       role="dialog"
       aria-modal="true"
@@ -122,15 +150,12 @@ export function OrderConfirmModal({
     >
       <div
         className="relative w-full max-w-md rounded-xl border border-border bg-surface shadow-surface-lg animate-slide-up"
-        style={{ maxHeight: '90vh', overflowY: 'auto' }}
+        style={{ maxHeight: '92vh', overflowY: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ── Header ──────────────────────────────────────── */}
+        {/* ── Header ──────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2
-            id="order-modal-title"
-            className="text-lg font-serif font-semibold text-off-white"
-          >
+          <h2 id="order-modal-title" className="text-lg font-serif font-semibold text-off-white">
             Confirm Order
           </h2>
           <button
@@ -143,95 +168,142 @@ export function OrderConfirmModal({
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-5">
-          {/* ── Order Summary ────────────────────────────── */}
-          <div className="rounded-lg border border-border bg-surface-2 p-4 space-y-3">
-            {/* Side badge */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-sans font-semibold uppercase tracking-widest text-[#a09a8e]">
-                Order Type
-              </span>
-              <span
-                className="px-3 py-1 rounded text-sm font-sans font-bold tracking-wide"
+        <div className="px-6 py-5 space-y-4">
+          {/* ── Buy/Sell badge + Ticker ──────────────────────── */}
+          <div className="flex items-center justify-between">
+            <div>
+              <div
+                className="inline-flex items-center px-3 py-1 rounded text-sm font-sans font-bold tracking-widest mb-2"
                 style={{ color: sideColor, backgroundColor: sideBg }}
               >
                 {sideLabel}
-              </span>
-            </div>
-
-            {/* Ticker / Company */}
-            <div className="flex items-start justify-between">
-              <span className="text-xs font-sans text-[#a09a8e]">Security</span>
-              <div className="text-right">
-                <p className="text-sm font-mono font-semibold text-off-white">{ticker}</p>
-                <p className="text-xs font-sans text-[#a09a8e]">{company}</p>
               </div>
+              <p className="text-xl font-mono font-bold text-off-white">{ticker}</p>
+              <p className="text-sm font-sans text-[#a09a8e] mt-0.5">{company}</p>
             </div>
+            <div className="text-right">
+              <p className="text-2xs font-sans text-[#6b6560] mb-1">Est. Price</p>
+              <p className="text-base font-mono font-semibold text-off-white">{fmt(estPrice)}</p>
+            </div>
+          </div>
 
-            {/* Shares */}
-            <div className="flex items-center justify-between">
+          {/* ── Order Details ────────────────────────────────── */}
+          <div className="rounded-lg border border-border bg-surface-2 divide-y divide-border">
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs font-sans text-[#a09a8e]">Order Type</span>
+              <span className="text-xs font-sans font-semibold text-off-white">{orderTypeLabel(orderType)}</span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs font-sans text-[#a09a8e]">Time In Force</span>
+              <span className="text-xs font-sans font-semibold text-off-white">{tifLabel(timeInForce)}</span>
+            </div>
+            {limitPrice != null && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs font-sans text-[#a09a8e]">Limit Price</span>
+                <span className="text-xs font-mono font-semibold text-off-white">{fmt(limitPrice)}</span>
+              </div>
+            )}
+            {stopPrice != null && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs font-sans text-[#a09a8e]">Stop Price</span>
+                <span className="text-xs font-mono font-semibold text-off-white">{fmt(stopPrice)}</span>
+              </div>
+            )}
+            {trailPct != null && (
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-xs font-sans text-[#a09a8e]">Trail %</span>
+                <span className="text-xs font-mono font-semibold text-off-white">{trailPct.toFixed(1)}%</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between px-4 py-2.5">
               <span className="text-xs font-sans text-[#a09a8e]">Shares</span>
-              <span className="text-sm font-mono text-off-white">
-                {shares.toLocaleString()}
+              <span className="text-xs font-mono font-semibold text-off-white">{shares.toLocaleString()}</span>
+            </div>
+          </div>
+
+          {/* ── Cost Breakdown ───────────────────────────────── */}
+          <div className="rounded-lg border border-border bg-surface-2 divide-y divide-border">
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs font-sans text-[#a09a8e]">Trade Value</span>
+              <span className="text-sm font-mono text-off-white">{fmt(subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-xs font-sans text-[#a09a8e]">
+                Obsidian Commission ({commissionRate})
+              </span>
+              <span className="text-sm font-mono font-semibold" style={{ color: '#c9a84c' }}>
+                {fmt(breakdown.amount)}
               </span>
             </div>
-
-            {/* Price per share */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-sans text-[#a09a8e]">Price per Share</span>
-              <span className="text-sm font-mono text-off-white">
-                {formatCurrency(price)}
+            <div className="flex items-center justify-between px-4 py-3">
+              <span className="text-sm font-sans font-semibold text-off-white">
+                {isBuy ? 'Total Cost' : 'Net Proceeds'}
               </span>
-            </div>
-
-            {/* Order type */}
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-sans text-[#a09a8e]">Order Execution</span>
-              <span className="text-xs font-sans text-[#a09a8e] bg-surface-3 px-2 py-0.5 rounded">
-                Market Order
+              <span className="text-base font-mono font-bold text-off-white">
+                {fmt(displayTotal)}
               </span>
             </div>
           </div>
 
-          {/* ── Commission Breakdown ─────────────────────── */}
-          <CommissionCalculator
-            shares={shares}
-            price={price}
-            tier={tier}
-            side={side}
-            compact={false}
-          />
+          {/* ── Upgrade savings box ──────────────────────────── */}
+          {upgradeTip && (
+            <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-[#c9a84c]/20 bg-[#c9a84c]/5">
+              <Zap size={13} className="text-gold shrink-0 mt-0.5" />
+              <p className="text-xs font-sans text-[#a09a8e]">
+                <span className="text-gold font-semibold">Lower your commission: </span>
+                {upgradeTip}
+              </p>
+            </div>
+          )}
 
-          {/* ── Reg BI Disclosure ────────────────────────── */}
-          <div className="rounded-lg border border-[#2a2a2a] bg-[#111111] p-4 space-y-3">
+          {/* ── Disclosures ──────────────────────────────────── */}
+          <div className="rounded-lg border border-border bg-surface-2 p-4 space-y-3">
+            {/* Risk disclaimer */}
             <div className="flex items-start gap-2.5">
-              <AlertCircle size={15} className="mt-0.5 shrink-0 text-[#c9a84c]" />
-              <div>
-                <p className="text-xs font-sans font-semibold text-[#c9a84c] mb-1">
-                  SEC Regulation Best Interest Disclosure
-                </p>
-                <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
-                  This trade includes a commission of {commissionRate}. Under SEC Regulation Best
-                  Interest, we are required to disclose all costs before execution. Our recommendation
-                  is based on your investment profile and financial interests.
-                </p>
-              </div>
+              <AlertCircle size={13} className="mt-0.5 shrink-0 text-[#c0453a]" />
+              <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
+                <span className="text-[#a09a8e] font-semibold">Risk Disclaimer: </span>
+                Investing involves risk. You may lose money. Past performance is not indicative of future results.
+              </p>
             </div>
 
             <div className="border-t border-border" />
 
-            {/* SIPC Notice */}
+            {/* Reg BI */}
             <div className="flex items-start gap-2.5">
-              <ShieldCheck size={15} className="mt-0.5 shrink-0 text-[#3d9e6e]" />
+              <AlertCircle size={13} className="mt-0.5 shrink-0 text-[#c9a84c]" />
               <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
-                Your account is protected up to{' '}
-                <span className="text-[#a09a8e] font-semibold">$500,000</span> by the Securities
-                Investor Protection Corporation (SIPC), including up to $250,000 for cash claims.
+                <span className="text-[#a09a8e] font-semibold">SEC Regulation Best Interest: </span>
+                A commission of {commissionRate} is disclosed per Reg BI. This is consistent with your investment
+                profile and serves your best interest.
+              </p>
+            </div>
+
+            <div className="border-t border-border" />
+
+            {/* Alpaca / SIPC */}
+            <div className="flex items-start gap-2.5">
+              <Building2 size={13} className="mt-0.5 shrink-0 text-[#3d9e6e]" />
+              <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
+                Trading executed by <span className="text-[#a09a8e] font-semibold">Alpaca Securities LLC</span>,
+                member FINRA/SIPC. Your account is protected up to{' '}
+                <span className="text-[#a09a8e] font-semibold">$500,000</span> by SIPC, including up to $250,000
+                for cash claims.
+              </p>
+            </div>
+
+            <div className="border-t border-border" />
+
+            {/* SIPC shield */}
+            <div className="flex items-start gap-2.5">
+              <ShieldCheck size={13} className="mt-0.5 shrink-0 text-[#3d9e6e]" />
+              <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
+                Obsidian Capital is not a registered broker-dealer. All brokerage services are provided through Alpaca Securities LLC.
               </p>
             </div>
           </div>
 
-          {/* ── Actions ─────────────────────────────────── */}
+          {/* ── Actions ─────────────────────────────────────── */}
           <div className="flex gap-3 pt-1">
             <button
               onClick={onClose}
@@ -245,10 +317,8 @@ export function OrderConfirmModal({
               disabled={isLoading}
               className="flex-1 h-11 rounded-lg text-sm font-sans font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
               style={{
-                backgroundColor: isLoading ? undefined : sideColor,
-                color: isBuy ? '#0a0a0a' : '#f0ede8',
-                opacity: isLoading ? 0.7 : 1,
                 background: isLoading ? '#1a1a1a' : sideColor,
+                color: isBuy ? '#0a0a0a' : '#f0ede8',
               }}
             >
               {isLoading ? (
@@ -257,9 +327,7 @@ export function OrderConfirmModal({
                   <span>Executing…</span>
                 </>
               ) : (
-                <span>
-                  Confirm {sideLabel}
-                </span>
+                <span>Confirm {sideLabel} →</span>
               )}
             </button>
           </div>

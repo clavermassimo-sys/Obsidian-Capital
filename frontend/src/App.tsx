@@ -3,7 +3,7 @@
    ============================================================ */
 
 import React, { Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import AppLayout from './components/layout/AppLayout';
 import { useAuth } from './contexts/AuthContext';
@@ -251,10 +251,8 @@ function AnimatedRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <Suspense fallback={<LoadingFallback />}>
-        <AnimatedRoutes />
-      </Suspense>
-    </BrowserRouter>
+    <Suspense fallback={<LoadingFallback />}>
+      <AnimatedRoutes />
+    </Suspense>
   );
 }
