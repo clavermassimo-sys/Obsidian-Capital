@@ -246,3 +246,89 @@ VALUES
     TRUE
   )
 ON CONFLICT (email) DO NOTHING;
+
+-- ============================================================
+-- Obsidian Capital — Alpaca, Stripe, and Commission Tables
+-- (appended by upgrade — safe to run on existing DB)
+-- ============================================================
+
+-- ─── EXTEND USERS TABLE ───────────────────────────────────────────────────────
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS alpaca_connected    BOOLEAN DEFAULT FALSE;
+
+-- ─── COMMISSIONS ─────────────────────────────────────────────────────────────
+-- One record per trade execution; tracks commission billing lifecycle.
+
+CREATE TABLE IF NOT EXISTS commissions (
+  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trade_id                 UUID REFERENCES trades(id) ON DELETE CASCADE,
+  user_id                  UUID REFERENCES users(id) ON DELETE CASCADE,
+  tier                     VARCHAR(20) NOT NULL CHECK (tier IN ('standard', 'member', 'private')),
+  trade_value              DECIMAL(20,2) NOT NULL,
+  commission_rate          DECIMAL(6,4) NOT NULL,
+  commission_amount        DECIMAL(20,2) NOT NULL,
+  stripe_payment_intent_id VARCHAR(255),
+  stripe_charge_id         VARCHAR(255),
+  payment_status           VARCHAR(20) DEFAULT 'pending'
+                             CHECK (payment_status IN ('pending', 'charged', 'failed', 'waived')),
+  created_at               TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_commissions_user_id    ON commissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_commissions_trade_id   ON commissions(trade_id);
+CREATE INDEX IF NOT EXISTS idx_commissions_created_at ON commissions(created_at);
+
+-- ─── SUBSCRIPTIONS ───────────────────────────────────────────────────────────
+-- Tracks Stripe subscription state per user; source of truth for billing tier.
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+  stripe_customer_id     VARCHAR(255) NOT NULL,
+  stripe_subscription_id VARCHAR(255),
+  tier                   VARCHAR(20) NOT NULL CHECK (tier IN ('standard', 'member', 'private')),
+  status                 VARCHAR(20) DEFAULT 'active'
+                           CHECK (status IN ('active', 'cancelled', 'past_due', 'trialing')),
+  current_period_start   TIMESTAMP WITH TIME ZONE,
+  current_period_end     TIMESTAMP WITH TIME ZONE,
+  trial_end              TIMESTAMP WITH TIME ZONE,
+  created_at             TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at             TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ─── PRICE ALERTS ────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS price_alerts (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID REFERENCES users(id) ON DELETE CASCADE,
+  ticker       VARCHAR(10) NOT NULL,
+  company_name VARCHAR(255),
+  target_price DECIMAL(20,2) NOT NULL,
+  direction    VARCHAR(10) NOT NULL CHECK (direction IN ('above', 'below')),
+  is_active    BOOLEAN DEFAULT TRUE,
+  triggered_at TIMESTAMP WITH TIME ZONE,
+  created_at   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_price_alerts_user_id ON price_alerts(user_id);
+CREATE INDEX IF NOT EXISTS idx_price_alerts_ticker  ON price_alerts(ticker);
+
+-- ─── ALPACA CONNECTIONS ───────────────────────────────────────────────────────
+-- Stores per-user Alpaca OAuth tokens for proxying trade execution.
+
+CREATE TABLE IF NOT EXISTS alpaca_connections (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+  access_token      TEXT NOT NULL,
+  refresh_token     TEXT,
+  paper_mode        BOOLEAN DEFAULT TRUE,
+  alpaca_account_id VARCHAR(255),
+  connected_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- ─── ADDITIONAL INDEXES ───────────────────────────────────────────────────────
+
+CREATE INDEX IF NOT EXISTS idx_users_stripe_customer_id ON users(stripe_customer_id)
+  WHERE stripe_customer_id IS NOT NULL;

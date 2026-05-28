@@ -12,6 +12,8 @@ import portfolioRouter from './routes/portfolio';
 import tradesRouter from './routes/trades';
 import marketRouter from './routes/market';
 import adminRouter from './routes/admin';
+import subscriptionsRouter from './routes/subscriptions';
+import webhooksRouter from './routes/webhooks';
 
 // ─── App Initialization ───────────────────────────────────────────────────────
 
@@ -67,6 +69,16 @@ app.use(
   })
 );
 
+// ─── Stripe Webhook (raw body BEFORE json parser) ────────────────────────────
+// Stripe signature verification requires the raw request body.
+// This MUST be registered before express.json() so the raw buffer is preserved.
+
+app.use(
+  '/webhooks/stripe',
+  express.raw({ type: 'application/json' }),
+  webhooksRouter
+);
+
 // ─── Request Parsing ──────────────────────────────────────────────────────────
 
 app.use(express.json({ limit: '10mb' }));
@@ -109,6 +121,7 @@ app.use('/api/portfolio', portfolioRouter);
 app.use('/api/trades', tradesRouter);
 app.use('/api/market', marketRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 
