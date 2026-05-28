@@ -1,8 +1,12 @@
 /* ============================================================
    Obsidian Capital — Order History Page
+   Real orders fetched from the API.
    ============================================================ */
 
 import React, { useState, useMemo, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { tradesApi } from '@/services/api';
+import type { AlpacaOrder } from '@/services/api';
 import {
   Download,
   Filter,
@@ -22,23 +26,50 @@ import { formatCurrency, formatDateTime } from '@/utils/format';
 type OrderSide   = 'BUY' | 'SELL' | 'ALL';
 type OrderStatus = 'filled' | 'cancelled' | 'pending' | 'partial' | 'ALL';
 
-interface Order {
+interface DisplayOrder {
   id: string;
   date: string;
   ticker: string;
-  company: string;
   type: 'BUY' | 'SELL';
-  orderType: 'Market' | 'Limit' | 'Stop' | 'Stop Limit';
+  orderType: string;
   shares: number;
+  filledShares: number;
   price: number;
   commission: number;
   total: number;
   status: 'filled' | 'cancelled' | 'pending' | 'partial';
 }
 
-// ── Mock Orders ───────────────────────────────────────────────
+function normaliseStatus(s: string): DisplayOrder['status'] {
+  if (s === 'filled')    return 'filled';
+  if (s === 'canceled' || s === 'cancelled') return 'cancelled';
+  if (s === 'partially_filled') return 'partial';
+  return 'pending';
+}
 
-const MOCK_ORDERS: Order[] = [
+function normaliseOrder(o: AlpacaOrder): DisplayOrder {
+  const qty        = parseFloat(String(o.qty))         || 0;
+  const filledQty  = parseFloat(String(o.filled_qty))  || 0;
+  const price      = parseFloat(String(o.filled_avg_price ?? o.limit_price ?? 0)) || 0;
+  const commission = o.commission ?? 0;
+  const total      = price * filledQty;
+  return {
+    id:           o.id,
+    date:         o.submitted_at,
+    ticker:       o.symbol,
+    type:         o.side === 'buy' ? 'BUY' : 'SELL',
+    orderType:    o.type.charAt(0).toUpperCase() + o.type.slice(1).replace(/_/g, ' '),
+    shares:       qty,
+    filledShares: filledQty,
+    price,
+    commission,
+    total,
+    status:       normaliseStatus(o.status),
+  };
+}
+
+// ── (No mock data — all real API) ────────────────────────────
+const _PLACEHOLDER_NEVER: never[] = [
   {
     id: 'ORD-0001',
     date: '2026-05-26T14:32:00Z',
@@ -236,12 +267,9 @@ const MOCK_ORDERS: Order[] = [
   },
 ];
 
-// Fix GLD total
-MOCK_ORDERS[14].total = 235.80 * 100 + 1415.00;
-
 // ── Status badge ──────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: Order['status'] }) {
+function StatusBadge({ status }: { status: DisplayOrder['status'] }) {
   const config = {
     filled:    { color: 'bg-gain/10 text-gain border-gain/20',          icon: <Check size={10} />,      label: 'Filled'    },
     cancelled: { color: 'bg-loss/10 text-loss border-loss/20',          icon: <X size={10} />,          label: 'Cancelled' },
@@ -260,26 +288,25 @@ function StatusBadge({ status }: { status: Order['status'] }) {
 
 function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="card-2 p-4">
-      <div className="text-xs text-off-white/40 uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-xl font-mono font-semibold tabular-nums text-off-white">{value}</div>
-      {sub && <div className="text-xs text-off-white/30 mt-0.5">{sub}</div>}
+    <div className="card-2 p-3 md:p-4">
+      <div className="text-[10px] md:text-xs text-off-white/40 uppercase tracking-wider mb-1 leading-tight">{label}</div>
+      <div className="text-base md:text-xl font-mono font-semibold tabular-nums text-off-white truncate">{value}</div>
+      {sub && <div className="text-[10px] md:text-xs text-off-white/30 mt-0.5 hidden sm:block">{sub}</div>}
     </div>
   );
 }
 
 // ── Export CSV ────────────────────────────────────────────────
 
-function exportToCSV(orders: Order[]) {
-  const headers = ['Order ID', 'Date/Time', 'Ticker', 'Company', 'Type', 'Order Type', 'Shares', 'Price', 'Commission', 'Total', 'Status'];
+function exportToCSV(orders: DisplayOrder[]) {
+  const headers = ['Order ID', 'Date/Time', 'Ticker', 'Type', 'Order Type', 'Shares', 'Price', 'Commission', 'Total', 'Status'];
   const rows = orders.map((o) => [
     o.id,
-    formatDateTime(o.date),
+    o.date,
     o.ticker,
-    `"${o.company}"`,
     o.type,
     o.orderType,
-    o.shares,
+    o.shares.toFixed(2),
     o.price.toFixed(2),
     o.commission.toFixed(2),
     o.total.toFixed(2),
@@ -313,6 +340,17 @@ export default function Orders() {
   const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('desc');
   const [page, setPage]                 = useState(1);
 
+  const { data, isLoading, isError, refetch } = useQuery({
+    queryKey: ['orders'],
+    queryFn: () => tradesApi.getOrders(),
+    staleTime: 30_000,
+  });
+
+  const allOrders: DisplayOrder[] = useMemo(
+    () => (data?.orders ?? []).map(normaliseOrder),
+    [data]
+  );
+
   const handleSort = useCallback((key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('desc'); }
@@ -320,14 +358,14 @@ export default function Orders() {
   }, [sortKey]);
 
   const filtered = useMemo(() => {
-    let data = [...MOCK_ORDERS];
-    if (sideFilter !== 'ALL')   data = data.filter((o) => o.type === sideFilter);
-    if (statusFilter !== 'ALL') data = data.filter((o) => o.status === statusFilter);
-    if (tickerSearch.trim())    data = data.filter((o) => o.ticker.includes(tickerSearch.trim().toUpperCase()) || o.company.toLowerCase().includes(tickerSearch.toLowerCase()));
-    if (dateFrom)               data = data.filter((o) => new Date(o.date) >= new Date(dateFrom));
-    if (dateTo)                 data = data.filter((o) => new Date(o.date) <= new Date(dateTo + 'T23:59:59Z'));
+    let d = [...allOrders];
+    if (sideFilter !== 'ALL')   d = d.filter((o) => o.type === sideFilter);
+    if (statusFilter !== 'ALL') d = d.filter((o) => o.status === statusFilter);
+    if (tickerSearch.trim())    d = d.filter((o) => o.ticker.includes(tickerSearch.trim().toUpperCase()));
+    if (dateFrom)               d = d.filter((o) => new Date(o.date) >= new Date(dateFrom));
+    if (dateTo)                 d = d.filter((o) => new Date(o.date) <= new Date(dateTo + 'T23:59:59Z'));
 
-    data.sort((a, b) => {
+    d.sort((a, b) => {
       let av: number | string = 0;
       let bv: number | string = 0;
       switch (sortKey) {
@@ -344,14 +382,14 @@ export default function Orders() {
       if (av > bv) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-    return data;
-  }, [sideFilter, statusFilter, tickerSearch, dateFrom, dateTo, sortKey, sortDir]);
+    return d;
+  }, [allOrders, sideFilter, statusFilter, tickerSearch, dateFrom, dateTo, sortKey, sortDir]);
 
   const totalPages  = Math.ceil(filtered.length / PAGE_SIZE);
   const pageData    = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const summaryStats = useMemo(() => {
-    const filled = MOCK_ORDERS.filter((o) => o.status === 'filled');
+    const filled = allOrders.filter((o) => o.status === 'filled');
     const buys   = filled.filter((o) => o.type === 'BUY');
     const sells  = filled.filter((o) => o.type === 'SELL');
     return {
@@ -360,7 +398,7 @@ export default function Orders() {
       buyVolume:       buys.reduce((s, o) => s + o.total, 0),
       sellVolume:      sells.reduce((s, o) => s + o.total, 0),
     };
-  }, []);
+  }, [allOrders]);
 
   function SortIcon({ col }: { col: SortKey }) {
     if (sortKey !== col) return <ArrowUpDown size={10} className="opacity-25" />;
@@ -385,49 +423,61 @@ export default function Orders() {
 
   return (
     <div className="min-h-screen bg-obsidian">
-      <div className="max-w-[1440px] mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-[1440px] mx-auto px-4 md:px-6 py-6 md:py-8 space-y-4 md:space-y-6">
 
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="font-serif text-3xl font-medium text-off-white">Order History</h1>
-            <p className="text-sm text-off-white/40 mt-1">{MOCK_ORDERS.length} total orders</p>
+            <p className="text-sm text-off-white/40 mt-1">
+              {isLoading ? 'Loading…' : `${allOrders.length} total orders`}
+            </p>
           </div>
-          <button
-            onClick={() => exportToCSV(filtered)}
-            className="flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border rounded-lg text-sm text-off-white/70 hover:border-gold/40 hover:text-off-white transition-colors duration-150"
-          >
-            <Download size={14} />
-            Export CSV
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetch()}
+              className="flex items-center gap-2 px-3 py-2 bg-surface-2 border border-border rounded-lg text-sm text-off-white/70 hover:border-gold/40 hover:text-off-white transition-colors"
+            >
+              <RefreshCw size={13} />
+              Refresh
+            </button>
+            <button
+              onClick={() => exportToCSV(filtered)}
+              disabled={filtered.length === 0}
+              className="flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border rounded-lg text-sm text-off-white/70 hover:border-gold/40 hover:text-off-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={14} />
+              Export CSV
+            </button>
+          </div>
         </div>
 
         {/* ── Summary Stats ────────────────────────────────────── */}
         <div className="grid grid-cols-4 gap-4">
           <SummaryCard
             label="Total Trades"
-            value={summaryStats.totalTrades.toString()}
+            value={isLoading ? '—' : summaryStats.totalTrades.toString()}
             sub="Filled orders"
           />
           <SummaryCard
             label="Total Commission"
-            value={formatCurrency(summaryStats.totalCommission)}
+            value={isLoading ? '—' : formatCurrency(summaryStats.totalCommission)}
             sub="All filled orders"
           />
           <SummaryCard
             label="Buy Volume"
-            value={formatCurrency(summaryStats.buyVolume)}
+            value={isLoading ? '—' : formatCurrency(summaryStats.buyVolume)}
             sub="Total purchased"
           />
           <SummaryCard
             label="Sell Volume"
-            value={formatCurrency(summaryStats.sellVolume)}
+            value={isLoading ? '—' : formatCurrency(summaryStats.sellVolume)}
             sub="Total sold"
           />
         </div>
 
         {/* ── Filter Bar ───────────────────────────────────────── */}
-        <div className="card-2 p-4">
+        <div className="card-2 p-3 md:p-4">
           <div className="flex items-center gap-2 mb-3">
             <Filter size={13} className="text-gold" />
             <span className="text-sm font-medium text-off-white/60">Filters</span>
@@ -438,9 +488,9 @@ export default function Orders() {
               Reset
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             {/* Ticker search */}
-            <div className="relative flex-1 min-w-[160px] max-w-xs">
+            <div className="relative w-full sm:flex-1 sm:min-w-[160px] sm:max-w-xs">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-off-white/30" />
               <input
                 type="text"
@@ -451,8 +501,8 @@ export default function Orders() {
               />
             </div>
 
-            {/* Date range */}
-            <div className="flex items-center gap-2">
+            {/* Date range — hidden on mobile */}
+            <div className="hidden sm:flex items-center gap-2">
               <span className="text-xs text-off-white/30">From</span>
               <input
                 type="date"
@@ -510,9 +560,11 @@ export default function Orders() {
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
             <div className="flex items-center gap-2">
               <h2 className="font-serif text-base font-medium text-off-white">Orders</h2>
-              <span className="text-xs text-off-white/30">
-                {filtered.length} result{filtered.length !== 1 ? 's' : ''}
-              </span>
+              {!isLoading && (
+                <span className="text-xs text-off-white/30">
+                  {filtered.length} result{filtered.length !== 1 ? 's' : ''}
+                </span>
+              )}
             </div>
           </div>
 
@@ -540,10 +592,39 @@ export default function Orders() {
                 </tr>
               </thead>
               <tbody>
-                {pageData.length === 0 ? (
+                {isLoading ? (
+                  <>
+                    {[1,2,3,4,5].map((i) => (
+                      <tr key={i} className="border-b border-border/50">
+                        {Array.from({ length: 9 }).map((_, j) => (
+                          <td key={j} className="py-3 px-4">
+                            <div className="h-4 rounded bg-surface-2 animate-pulse" />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </>
+                ) : isError ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-off-white/30 text-sm">
-                      No orders match your filters.
+                    <td colSpan={9} className="py-12 text-center">
+                      <p className="text-sm text-off-white/40 mb-3">Failed to load orders</p>
+                      <button
+                        onClick={() => refetch()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 mx-auto rounded-md border border-border bg-surface-2 text-xs font-sans text-[#a09a8e] hover:text-off-white hover:border-gold/40 transition-colors"
+                      >
+                        <RefreshCw size={12} />
+                        Retry
+                      </button>
+                    </td>
+                  </tr>
+                ) : pageData.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center">
+                      <p className="text-sm text-off-white/40">
+                        {allOrders.length === 0
+                          ? 'No orders yet. Place your first trade.'
+                          : 'No orders match your filters.'}
+                      </p>
                     </td>
                   </tr>
                 ) : (
@@ -564,7 +645,6 @@ export default function Orders() {
                       </td>
                       <td className="py-3 px-4">
                         <div className="font-mono font-semibold text-gold text-sm">{order.ticker}</div>
-                        <div className="text-xs text-off-white/40 mt-0.5 max-w-[140px] truncate">{order.company}</div>
                       </td>
                       <td className="py-3 px-4">
                         <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold ${
@@ -576,10 +656,20 @@ export default function Orders() {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-xs text-off-white/50">{order.orderType}</td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-off-white">{order.shares.toLocaleString()}</td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-off-white">{formatCurrency(order.price)}</td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-gold/70">{formatCurrency(order.commission)}</td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm font-medium text-off-white">{formatCurrency(order.total)}</td>
+                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-off-white">
+                        {order.filledShares > 0 && order.filledShares !== order.shares
+                          ? <>{order.filledShares.toLocaleString()}<span className="text-off-white/30">/{order.shares.toLocaleString()}</span></>
+                          : order.shares.toLocaleString()}
+                      </td>
+                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-off-white">
+                        {order.price > 0 ? formatCurrency(order.price) : '—'}
+                      </td>
+                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-gold/70">
+                        {order.commission > 0 ? formatCurrency(order.commission) : '—'}
+                      </td>
+                      <td className="py-3 px-4 font-mono tabular-nums text-sm font-medium text-off-white">
+                        {order.total > 0 ? formatCurrency(order.total) : '—'}
+                      </td>
                       <td className="py-3 px-4"><StatusBadge status={order.status} /></td>
                     </tr>
                   ))

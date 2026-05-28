@@ -219,7 +219,59 @@ export function HoldingsTable({ holdings: propHoldings, className = '', showHead
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      {/* ── Mobile card list (< md) ──────────────────────── */}
+      <div className="md:hidden divide-y divide-border">
+        {sorted.map((holding) => {
+          const isPositive  = holding.returnDollar >= 0;
+          const returnColor = isPositive ? '#3d9e6e' : '#c0453a';
+          return (
+            <button
+              key={holding.ticker}
+              onClick={() => setSelectedTicker(holding.ticker)}
+              className="w-full text-left px-4 py-3 active:bg-surface-2 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2">
+                {/* Left: ticker + company + shares */}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="font-mono font-bold text-sm text-off-white">{holding.ticker}</span>
+                    {holding.marketValue > 10_000 && (
+                      <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-2xs font-semibold" style={{ backgroundColor: 'rgba(201,168,76,0.12)', color: '#c9a84c' }}>
+                        <Crown size={8} /> P
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-[#a09a8e] truncate">{holding.companyName}</p>
+                  <p className="text-xs text-[#6b6560] mt-0.5">{holding.shares.toLocaleString()} shares</p>
+                </div>
+                {/* Right: value + return */}
+                <div className="text-right flex-shrink-0">
+                  <p className="font-mono text-sm font-semibold text-off-white">{fmtCurrency(holding.marketValue)}</p>
+                  <p className="font-mono text-xs font-semibold mt-0.5" style={{ color: returnColor }}>
+                    {isPositive ? '+' : ''}{holding.returnPct.toFixed(2)}%
+                  </p>
+                  <p className="font-mono text-xs mt-0.5" style={{ color: returnColor }}>
+                    {fmtDollarReturn(holding.returnDollar)}
+                  </p>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+        {/* Mobile totals footer */}
+        <div className="px-4 py-3 bg-surface-2/50 flex items-center justify-between">
+          <span className="text-xs text-[#6b6560]">{holdings.length} position{holdings.length !== 1 ? 's' : ''}</span>
+          <div className="text-right">
+            <p className="font-mono text-sm font-bold text-off-white">{fmtCurrency(totals.totalMarketValue)}</p>
+            <p className="font-mono text-xs font-semibold mt-0.5" style={{ color: totals.totalReturnDollar >= 0 ? '#3d9e6e' : '#c0453a' }}>
+              {fmtPct(totals.totalReturnPct)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Desktop table (md+) ──────────────────────────── */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full border-collapse">
           <thead>
             <tr className="border-b border-border">
@@ -404,9 +456,9 @@ export function HoldingsTable({ holdings: propHoldings, className = '', showHead
         </table>
       </div>
 
-      {/* Export footer */}
+      {/* Export footer — desktop only */}
       {!showHeader && (
-        <div className="flex items-center justify-end px-5 py-2.5 border-t border-border bg-surface-2/50">
+        <div className="hidden md:flex items-center justify-end px-5 py-2.5 border-t border-border bg-surface-2/50">
           <button
             onClick={exportCSV}
             className="flex items-center gap-1.5 text-xs text-[#6b6560] hover:text-off-white transition-colors"

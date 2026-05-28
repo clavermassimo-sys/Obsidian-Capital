@@ -211,13 +211,13 @@ export default function Markets() {
 
   return (
     <div className="min-h-screen bg-obsidian">
-      <div className="max-w-[1440px] mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-[1440px] mx-auto px-4 md:px-6 py-6 md:py-8 space-y-4 md:space-y-6">
 
         {/* ── Header ─────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="font-serif text-3xl font-medium text-off-white">Markets</h1>
-            <p className="text-sm text-off-white/40 mt-1">
+            <h1 className="font-serif text-2xl md:text-3xl font-medium text-off-white">Markets</h1>
+            <p className="text-xs md:text-sm text-off-white/40 mt-1">
               Real-time market data &amp; analysis
             </p>
           </div>
@@ -237,9 +237,9 @@ export default function Markets() {
         <div>
           <div className="flex items-center gap-2 mb-3">
             <Globe size={14} className="text-gold" />
-            <h2 className="font-serif text-lg font-medium text-off-white">Market Indices</h2>
+            <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Market Indices</h2>
           </div>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
             {INDICES.map((idx) => (
               <IndexCard key={idx.symbol} index={idx} />
             ))}
@@ -247,7 +247,7 @@ export default function Markets() {
         </div>
 
         {/* ── Gainers / Losers ────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
           {/* Top Gainers */}
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3.5 border-b border-border">
@@ -287,53 +287,56 @@ export default function Markets() {
           </div>
         </div>
 
-        {/* ── Sector Heatmap ──────────────────────────────────── */}
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-4">
+        {/* ── Sector Heatmap — horizontally scrollable on mobile ── */}
+        <div className="card p-4 md:p-5">
+          <div className="flex items-center gap-2 mb-3 md:mb-4">
             <BarChart2 size={15} className="text-gold" />
-            <h2 className="font-serif text-lg font-medium text-off-white">Sector Performance</h2>
-            <span className="ml-auto text-xs text-off-white/30">S&amp;P 500 Sectors · Today</span>
+            <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Sector Performance</h2>
+            <span className="ml-auto text-xs text-off-white/30 hidden sm:inline">S&amp;P 500 Sectors · Today</span>
           </div>
-          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-11">
-            {SECTORS.map((sector) => {
-              const isHovered = hoveredSector === sector.name;
-              const colorClass = sectorColor(sector.changePct);
-              const isPos = sector.changePct >= 0;
-              return (
-                <div
-                  key={sector.name}
-                  className={`relative rounded-lg p-3 flex flex-col items-center justify-center gap-1 cursor-default transition-all duration-200 border border-transparent ${colorClass} ${isHovered ? 'scale-105 shadow-surface-lg border-white/10 z-10' : ''}`}
-                  style={{ minHeight: '80px' }}
-                  onMouseEnter={() => setHoveredSector(sector.name)}
-                  onMouseLeave={() => setHoveredSector(null)}
-                >
-                  <div className="text-xs font-medium text-center leading-tight opacity-90">
-                    {sector.name}
-                  </div>
-                  <div className="text-sm font-mono font-bold tabular-nums">
-                    {isPos ? '+' : ''}{sector.changePct.toFixed(2)}%
-                  </div>
-                  {isHovered && (
-                    <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-surface-2 border border-border rounded px-2 py-1 text-xs whitespace-nowrap text-off-white z-20 shadow-surface-lg pointer-events-none">
-                      {sector.name}: {isPos ? '+' : ''}{sector.changePct.toFixed(2)}%
+          {/* Mobile: horizontal scroll; Desktop: grid */}
+          <div className="overflow-x-auto scrollbar-hidden -mx-4 md:mx-0 px-4 md:px-0">
+            <div className="flex gap-2 md:grid md:grid-cols-4 lg:grid-cols-11 min-w-max md:min-w-0">
+              {SECTORS.map((sector) => {
+                const isHovered = hoveredSector === sector.name;
+                const colorClass = sectorColor(sector.changePct);
+                const isPos = sector.changePct >= 0;
+                return (
+                  <div
+                    key={sector.name}
+                    className={`relative rounded-lg p-2 md:p-3 flex flex-col items-center justify-center gap-1 cursor-default transition-all duration-200 border border-transparent ${colorClass} ${isHovered ? 'scale-105 shadow-surface-lg border-white/10 z-10' : ''}`}
+                    style={{ minHeight: '70px', minWidth: '72px' }}
+                    onMouseEnter={() => setHoveredSector(sector.name)}
+                    onMouseLeave={() => setHoveredSector(null)}
+                  >
+                    <div className="text-[10px] md:text-xs font-medium text-center leading-tight opacity-90">
+                      {sector.name}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    <div className="text-xs md:text-sm font-mono font-bold tabular-nums">
+                      {isPos ? '+' : ''}{sector.changePct.toFixed(2)}%
+                    </div>
+                    {isHovered && (
+                      <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-surface-2 border border-border rounded px-2 py-1 text-xs whitespace-nowrap text-off-white z-20 shadow-surface-lg pointer-events-none">
+                        {sector.name}: {isPos ? '+' : ''}{sector.changePct.toFixed(2)}%
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
           {/* Legend */}
-          <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border">
-            <span className="text-xs text-off-white/30">Performance scale:</span>
+          <div className="flex items-center gap-3 md:gap-4 mt-4 pt-3 border-t border-border flex-wrap">
+            <span className="text-xs text-off-white/30">Scale:</span>
             <div className="flex items-center gap-1">
               {[-1.5, -0.8, -0.3, 0.1, 0.5, 1.0, 1.8].map((v) => (
                 <div
                   key={v}
-                  className={`w-5 h-3 rounded-sm ${sectorColor(v)}`}
+                  className={`w-4 md:w-5 h-3 rounded-sm ${sectorColor(v)}`}
                 />
               ))}
             </div>
-            <div className="flex items-center gap-3 text-xs">
+            <div className="flex items-center gap-2 md:gap-3 text-xs">
               <span className="text-loss">Bearish</span>
               <span className="text-off-white/30">→</span>
               <span className="text-gain">Bullish</span>
@@ -345,7 +348,7 @@ export default function Markets() {
         <div>
           <div className="flex items-center gap-2 mb-3">
             <Newspaper size={14} className="text-gold" />
-            <h2 className="font-serif text-lg font-medium text-off-white">Market News</h2>
+            <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Market News</h2>
           </div>
           <div className="space-y-3">
             {NEWS.map((item) => (
@@ -353,20 +356,20 @@ export default function Markets() {
                 key={item.id}
                 className="card p-4 hover:border-gold/20 transition-colors duration-200 cursor-pointer group"
               >
-                <div className="flex items-start gap-4">
+                <div className="flex items-start gap-3 md:gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-2xs font-medium border ${TAG_COLORS[item.tag] ?? 'bg-surface-3 text-off-white/60 border-border'}`}>
                         {item.tag}
                       </span>
                       <span className="text-xs text-off-white/30">{item.source}</span>
-                      <span className="text-xs text-off-white/20">·</span>
-                      <span className="text-xs text-off-white/30">{formatRelativeTime(item.timestamp)}</span>
+                      <span className="text-xs text-off-white/20 hidden sm:inline">·</span>
+                      <span className="text-xs text-off-white/30 hidden sm:inline">{formatRelativeTime(item.timestamp)}</span>
                     </div>
-                    <h3 className="font-serif text-base font-medium text-off-white group-hover:text-gold transition-colors duration-150 leading-snug mb-1.5">
+                    <h3 className="font-serif text-sm md:text-base font-medium text-off-white group-hover:text-gold transition-colors duration-150 leading-snug mb-1.5">
                       {item.headline}
                     </h3>
-                    <p className="text-sm text-off-white/50 leading-relaxed line-clamp-2">
+                    <p className="text-xs md:text-sm text-off-white/50 leading-relaxed line-clamp-2 hidden sm:block">
                       {item.description}
                     </p>
                   </div>

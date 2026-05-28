@@ -91,6 +91,19 @@ export interface QuoteResponse {
   volume: number;
   high52: number;
   low52: number;
+  // Extended fields returned by some endpoints
+  open?: number;
+  high?: number;
+  low?: number;
+  previousClose?: number;
+  avgVolume?: number;
+  marketCap?: number;
+  peRatio?: number;
+  eps?: number;
+  dividendYield?: number;
+  beta?: number;
+  companyName?: string;
+  timestamp?: string;
 }
 
 export interface Bar {

@@ -1,12 +1,12 @@
 /* ============================================================
-   Obsidian Capital — Dashboard Page (Complete Rewrite)
-   Portfolio overview with Framer Motion staggered animations,
-   market status, commission tier info, and upgrade prompts.
+   Obsidian Capital — Dashboard Page
+   Portfolio overview fetching live data from the API.
    ============================================================ */
 
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query';
 import {
   TrendingUp,
   TrendingDown,
@@ -15,6 +15,7 @@ import {
   ArrowUpRight,
   Clock,
   Download,
+  ExternalLink,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,6 +30,7 @@ import { formatCurrency, formatPercent, formatTierName } from '@/utils/format';
 import { HoldingsTable } from '@/components/portfolio/HoldingsTable';
 import { Watchlist } from '@/components/market/Watchlist';
 import { AlpacaConnectBanner } from '@/components/ui/AlpacaConnectBanner';
+import { marketApi, tradesApi } from '@/services/api';
 
 // ── Market Status ─────────────────────────────────────────────
 
@@ -64,6 +66,13 @@ const MARKET_STATUS_CONFIG: Record<MarketStatus, { label: string; dot: string; b
   'closed':       { label: 'Market Closed', dot: 'bg-[#6b6560]',          badge: 'bg-surface-3 border-border text-[#6b6560]' },
 };
 
+// ── Helpers ───────────────────────────────────────────────────
+
+function toNum(v: string | number | undefined | null): number {
+  if (v === undefined || v === null) return 0;
+  return typeof v === 'number' ? v : parseFloat(v as string) || 0;
+}
+
 // ── Animation variants ────────────────────────────────────────
 
 const container = {
@@ -79,21 +88,16 @@ const item = {
   show:   { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
 };
 
-// ── Sparkline data ────────────────────────────────────────────
+// ── Skeleton card ─────────────────────────────────────────────
 
-function useMiniSparkline(base: number, trend: 'up' | 'down' | 'flat', seed = 1) {
-  return useMemo(() => {
-    // Deterministic "random" using seed
-    const rng = (i: number) => {
-      const x = Math.sin(seed * 9301 + i * 49297 + 233) * 10000;
-      return x - Math.floor(x);
-    };
-    return Array.from({ length: 8 }, (_, i) => {
-      const drift = trend === 'up' ? i * base * 0.004 : trend === 'down' ? -i * base * 0.003 : 0;
-      const noise = (rng(i) - 0.5) * base * 0.012;
-      return { v: Math.max(0, base + drift + noise) };
-    });
-  }, [base, trend, seed]);
+function SkeletonCard() {
+  return (
+    <motion.div variants={item} className="card p-5 flex flex-col gap-3">
+      <div className="h-3 w-24 bg-surface-2 rounded animate-pulse" />
+      <div className="h-8 w-32 bg-surface-2 rounded animate-pulse" />
+      <div className="h-3 w-20 bg-surface-2 rounded animate-pulse" />
+    </motion.div>
+  );
 }
 
 // ── Stat Card ─────────────────────────────────────────────────
@@ -104,49 +108,22 @@ interface StatCardProps {
   sub?: string;
   subColor?: string;
   icon: React.ReactNode;
-  sparkData?: { v: number }[];
-  sparkColor?: string;
-  sparkId?: string;
 }
 
-function StatCard({ label, value, sub, subColor, icon, sparkData, sparkColor = '#c9a84c', sparkId = 'spark' }: StatCardProps) {
+function StatCard({ label, value, sub, subColor, icon }: StatCardProps) {
   return (
     <motion.div variants={item} className="card p-3 md:p-5 flex flex-col gap-2 md:gap-3">
       <div className="flex items-center justify-between">
         <span className="text-[10px] md:text-xs font-medium text-off-white/40 uppercase tracking-wider leading-tight">{label}</span>
         <span className="text-off-white/25 hidden sm:block">{icon}</span>
       </div>
-      <div className="flex items-end justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="text-base md:text-2xl font-mono font-semibold tabular-nums text-off-white tracking-tight leading-none truncate">
-            {value}
-          </div>
-          {sub && (
-            <div className={`text-[10px] md:text-xs font-medium mt-1 md:mt-1.5 tabular-nums ${subColor ?? 'text-off-white/50'}`}>
-              {sub}
-            </div>
-          )}
+      <div className="min-w-0">
+        <div className="text-base md:text-2xl font-mono font-semibold tabular-nums text-off-white tracking-tight leading-none truncate">
+          {value}
         </div>
-        {sparkData && (
-          <div className="w-12 md:w-20 h-8 md:h-10 opacity-70 flex-shrink-0 ml-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={sparkData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id={`spark-${sparkId}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={sparkColor} stopOpacity={0.35} />
-                    <stop offset="100%" stopColor={sparkColor} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area
-                  type="monotone"
-                  dataKey="v"
-                  stroke={sparkColor}
-                  strokeWidth={1.5}
-                  fill={`url(#spark-${sparkId})`}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+        {sub && (
+          <div className={`text-[10px] md:text-xs font-medium mt-1 md:mt-1.5 tabular-nums ${subColor ?? 'text-off-white/50'}`}>
+            {sub}
           </div>
         )}
       </div>
@@ -162,8 +139,8 @@ function CommissionTierCard({ tier }: { tier: string }) {
   const savings   = tier === 'standard' ? '2–3%' : tier === 'member' ? '2%' : null;
 
   return (
-    <motion.div variants={item} className="card-2 p-4 flex items-center justify-between gap-4 flex-wrap">
-      <div className="flex items-center gap-4">
+    <motion.div variants={item} className="card-2 p-3 md:p-4 flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-2 md:gap-4 flex-wrap">
         <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
           tier === 'private' ? 'bg-gold/20 text-gold-light border-gold/40'
           : tier === 'member' ? 'bg-gold/10 text-gold border-gold/20'
@@ -193,50 +170,156 @@ function CommissionTierCard({ tier }: { tier: string }) {
   );
 }
 
-// ── Portfolio Performance Chart ───────────────────────────────
+// ── Market Indices Bar ─────────────────────────────────────────
 
-function PortfolioChart({ portfolioValue }: { portfolioValue: number }) {
-  const data = useMemo(() => {
-    const base = portfolioValue * 0.65;
-    return Array.from({ length: 90 }, (_, i) => {
-      const date = new Date('2026-02-25');
-      date.setDate(date.getDate() + i);
-      // Deterministic noise
-      const noise = Math.sin(i * 2.1 + 0.7) * portfolioValue * 0.018 + Math.cos(i * 0.8) * portfolioValue * 0.01;
-      const trend = i * (portfolioValue - base) / 90;
-      return {
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        value: Math.max(base + trend + noise, base * 0.9),
-      };
-    });
-  }, [portfolioValue]);
+function MarketIndicesBar() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['market-indices'],
+    queryFn: () => marketApi.getIndices(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex gap-4 overflow-x-auto py-1">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-12 w-32 rounded-lg bg-surface-2 animate-pulse flex-shrink-0" />
+        ))}
+      </div>
+    );
+  }
+
+  const indices = data?.indices ?? [];
+  if (indices.length === 0) return null;
 
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id="portfolioGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#c9a84c" stopOpacity={0.22} />
-            <stop offset="100%" stopColor="#c9a84c" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <Tooltip
-          contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }}
-          labelStyle={{ color: '#a09a8e', fontSize: 11 }}
-          itemStyle={{ color: '#f0ede8', fontFamily: 'JetBrains Mono, monospace', fontSize: 13 }}
-          formatter={(v: number) => [formatCurrency(v), 'Portfolio']}
-        />
-        <Area
-          type="monotone"
-          dataKey="value"
-          stroke="#c9a84c"
-          strokeWidth={2}
-          fill="url(#portfolioGrad)"
-          dot={false}
-          activeDot={{ r: 4, fill: '#c9a84c', strokeWidth: 0 }}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className="flex gap-2 md:gap-3 overflow-x-auto py-1 scrollbar-hidden -mx-4 md:mx-0 px-4 md:px-0">
+      {indices.map((idx) => {
+        const isPos = idx.changePct >= 0;
+        return (
+          <div key={idx.symbol} className="flex-shrink-0 card-2 px-4 py-2.5 flex items-center gap-3">
+            <div>
+              <p className="text-xs font-sans font-medium text-off-white/50">{idx.name ?? idx.symbol}</p>
+              <p className="text-sm font-mono font-semibold text-off-white tabular-nums">
+                {idx.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <span className={`text-xs font-mono font-semibold ${isPos ? 'text-gain' : 'text-loss'}`}>
+              {isPos ? '+' : ''}{idx.changePct.toFixed(2)}%
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Top Movers ────────────────────────────────────────────────
+
+function TopMovers() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['market-movers'],
+    queryFn: () => marketApi.getMovers(),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-12 rounded-lg bg-surface-2 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  const gainers = data?.gainers?.slice(0, 3) ?? [];
+  const losers  = data?.losers?.slice(0, 3) ?? [];
+
+  if (gainers.length === 0 && losers.length === 0) return (
+    <p className="text-xs text-off-white/30 text-center py-4">No mover data available</p>
+  );
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <p className="text-xs font-sans font-semibold text-off-white/30 uppercase tracking-wider mb-2">Top Gainers</p>
+        <div className="space-y-1.5">
+          {gainers.map((m) => (
+            <div key={m.symbol} className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-2">
+              <span className="text-sm font-mono font-semibold text-gold">{m.symbol}</span>
+              <span className="text-xs font-mono font-semibold text-gain">+{m.changePct.toFixed(2)}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="text-xs font-sans font-semibold text-off-white/30 uppercase tracking-wider mb-2">Top Losers</p>
+        <div className="space-y-1.5">
+          {losers.map((m) => (
+            <div key={m.symbol} className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-2">
+              <span className="text-sm font-mono font-semibold text-gold">{m.symbol}</span>
+              <span className="text-xs font-mono font-semibold text-loss">{m.changePct.toFixed(2)}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── News Feed ────────────────────────────────────────────────
+
+function NewsFeed() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['market-news'],
+    queryFn: () => marketApi.getNews(undefined, 5),
+    staleTime: 5 * 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-16 rounded-lg bg-surface-2 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  const news = data?.news ?? [];
+  if (news.length === 0) return (
+    <p className="text-xs text-off-white/30 text-center py-4">No news available</p>
+  );
+
+  return (
+    <div className="space-y-3">
+      {news.map((n, i) => (
+        <a
+          key={i}
+          href={n.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block p-3 rounded-lg bg-surface-2 hover:bg-surface-3 transition-colors group"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-sans text-off-white/80 group-hover:text-off-white line-clamp-2 transition-colors flex-1">
+              {n.headline}
+            </p>
+            <ExternalLink size={12} className="text-off-white/20 group-hover:text-off-white/40 flex-shrink-0 mt-0.5 transition-colors" />
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-xs font-sans text-off-white/30">
+              {new Date(n.publishedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+            {n.symbols?.slice(0, 3).map((s) => (
+              <span key={s} className="text-2xs font-mono px-1.5 py-0.5 rounded bg-surface-3 text-off-white/40">{s}</span>
+            ))}
+          </div>
+        </a>
+      ))}
+    </div>
   );
 }
 
@@ -275,19 +358,26 @@ export default function Dashboard() {
 
   const marketStatus = getMarketStatus();
   const statusConfig = MARKET_STATUS_CONFIG[marketStatus];
+  const tier = user?.tier ?? 'standard';
 
-  const portfolioValue = user?.portfolioValue ?? 1_843_200;
-  const buyingPower    = user?.buyingPower ?? 250_000;
-  const todayPnL       = 14_823.42;
-  const todayPnLPct    = 0.81;
-  const totalReturn    = 643_200;
-  const totalReturnPct = 53.6;
-  const tier           = user?.tier ?? 'standard';
+  // ── Fetch account data ───────────────────────────────────
 
-  const portfolioSpark = useMiniSparkline(portfolioValue, 'up', 1);
-  const pnlSpark       = useMiniSparkline(todayPnL, 'up', 2);
-  const returnSpark    = useMiniSparkline(totalReturn, 'up', 3);
-  const buySpark       = useMiniSparkline(buyingPower, 'flat', 4);
+  const { data: accountData, isLoading: accountLoading } = useQuery({
+    queryKey: ['account'],
+    queryFn: () => tradesApi.getAccount(),
+    staleTime: 60_000,
+    enabled: !!alpacaConnected,
+  });
+
+  const account      = accountData?.account;
+  const equity       = toNum(account?.equity);
+  const buyingPower  = toNum(account?.buying_power);
+  const cash         = toNum(account?.cash);
+  const lastEquity   = toNum(account?.last_equity);
+  const todayPnL     = equity > 0 && lastEquity > 0 ? equity - lastEquity : 0;
+  const todayPnLPct  = lastEquity > 0 ? (todayPnL / lastEquity) * 100 : 0;
+  const isGain       = todayPnL >= 0;
+  const portfolioValue = equity > 0 ? equity : user?.portfolioValue ?? 0;
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -312,17 +402,16 @@ export default function Dashboard() {
               <p className="text-xs md:text-sm text-off-white/40 mt-1">
                 {greeting},{' '}
                 <span className="text-off-white/70">{user?.name?.split(' ')[0] ?? 'Investor'}</span>
-                {' '}· <span className="hidden sm:inline">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                {' '}·{' '}
+                <span className="hidden sm:inline">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
                 <span className="sm:hidden">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Market status badge */}
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${statusConfig.badge}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot}`} />
                 {statusConfig.label}
               </div>
-              {/* ET clock — hidden on smallest screens */}
               <div className="hidden sm:flex items-center gap-1.5 text-xs text-off-white/30">
                 <Clock size={12} />
                 <span>
@@ -339,49 +428,59 @@ export default function Dashboard() {
             </motion.div>
           )}
 
+          {/* ── Market Indices ────────────────────────────────── */}
+          <motion.div variants={item}>
+            <MarketIndicesBar />
+          </motion.div>
+
           {/* ── Upgrade prompt ────────────────────────────────── */}
           <UpgradePromptBanner tier={tier} monthlyVolume={portfolioValue * 0.15} />
 
           {/* ── Stats Row ────────────────────────────────────── */}
           <motion.div variants={container} className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-            <StatCard
-              label="Portfolio Value"
-              value={formatCurrency(portfolioValue, { compact: false })}
-              sub="Total market value"
-              icon={<DollarSign size={16} />}
-              sparkData={portfolioSpark}
-              sparkColor="#c9a84c"
-              sparkId="portfolio"
-            />
-            <StatCard
-              label="Today's P&L"
-              value={`+${formatCurrency(todayPnL)}`}
-              sub={`+${todayPnLPct.toFixed(2)}% today`}
-              subColor="text-gain"
-              icon={<TrendingUp size={16} />}
-              sparkData={pnlSpark}
-              sparkColor="#3d9e6e"
-              sparkId="pnl"
-            />
-            <StatCard
-              label="Total Return"
-              value={`+${formatCurrency(totalReturn)}`}
-              sub={`+${totalReturnPct.toFixed(1)}% since inception`}
-              subColor="text-gain"
-              icon={<ArrowUpRight size={16} />}
-              sparkData={returnSpark}
-              sparkColor="#3d9e6e"
-              sparkId="return"
-            />
-            <StatCard
-              label="Buying Power"
-              value={formatCurrency(buyingPower)}
-              sub="Available cash"
-              icon={<DollarSign size={16} />}
-              sparkData={buySpark}
-              sparkColor="#a09a8e"
-              sparkId="buying"
-            />
+            {accountLoading ? (
+              [1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)
+            ) : !alpacaConnected || !account ? (
+              <motion.div variants={item} className="card p-5 col-span-full flex items-center justify-center gap-3 py-8">
+                <p className="text-sm font-sans text-off-white/40">
+                  Connect your Alpaca account to see live portfolio data
+                </p>
+                <Link
+                  to="/account"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gold text-obsidian text-xs font-bold hover:brightness-110 transition-all"
+                >
+                  Connect <ExternalLink size={12} />
+                </Link>
+              </motion.div>
+            ) : (
+              <>
+                <StatCard
+                  label="Portfolio Value"
+                  value={formatCurrency(portfolioValue, { compact: false })}
+                  sub="Total equity"
+                  icon={<DollarSign size={16} />}
+                />
+                <StatCard
+                  label="Today's P&L"
+                  value={`${isGain ? '+' : ''}${formatCurrency(todayPnL)}`}
+                  sub={`${isGain ? '+' : ''}${todayPnLPct.toFixed(2)}% today`}
+                  subColor={isGain ? 'text-gain' : 'text-loss'}
+                  icon={isGain ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
+                />
+                <StatCard
+                  label="Cash"
+                  value={formatCurrency(cash)}
+                  sub="Available cash"
+                  icon={<DollarSign size={16} />}
+                />
+                <StatCard
+                  label="Buying Power"
+                  value={formatCurrency(buyingPower)}
+                  sub="Available to trade"
+                  icon={<Zap size={16} />}
+                />
+              </>
+            )}
           </motion.div>
 
           {/* ── Commission Tier Card ──────────────────────────── */}
@@ -390,26 +489,8 @@ export default function Dashboard() {
           {/* ── Main Content: 60/40 grid ──────────────────────── */}
           <motion.div variants={item} className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 md:gap-6">
 
-            {/* Left: Portfolio Chart + Holdings */}
+            {/* Left: Holdings + Market Data */}
             <div className="space-y-4 md:space-y-6">
-              {/* Portfolio Chart */}
-              <div className="card p-4 md:p-5">
-                <div className="flex items-center justify-between mb-3 md:mb-4">
-                  <div>
-                    <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Performance</h2>
-                    <p className="text-xs text-off-white/40 mt-0.5">90-day portfolio value</p>
-                  </div>
-                  <div className="flex items-center gap-1 text-xs text-gain font-medium">
-                    <TrendingUp size={12} />
-                    +{totalReturnPct.toFixed(1)}% overall
-                  </div>
-                </div>
-                {/* Reduced chart height on mobile */}
-                <div className="h-[200px] md:h-[280px]">
-                  <PortfolioChart portfolioValue={portfolioValue} />
-                </div>
-              </div>
-
               {/* Holdings Table */}
               <div className="card overflow-hidden">
                 <div className="flex items-center justify-between px-4 md:px-5 py-3 md:py-4 border-b border-border">
@@ -439,6 +520,18 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <HoldingsTable />
+              </div>
+
+              {/* Top Movers + News */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+                <div className="card p-4 md:p-5">
+                  <h2 className="font-serif text-base font-medium text-off-white mb-3 md:mb-4">Top Movers</h2>
+                  <TopMovers />
+                </div>
+                <div className="card p-4 md:p-5">
+                  <h2 className="font-serif text-base font-medium text-off-white mb-3 md:mb-4">Market News</h2>
+                  <NewsFeed />
+                </div>
               </div>
             </div>
 

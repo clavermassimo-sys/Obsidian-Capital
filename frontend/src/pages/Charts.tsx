@@ -1,7 +1,6 @@
 /* ============================================================
    Obsidian Capital — Charts Page (TradingView Lightweight Charts)
-   Real candlestick charts via lightweight-charts library,
-   with volume, MAs, RSI, MACD via recharts.
+   Real candlestick charts from API, with volume, MAs, RSI, MACD.
    ============================================================ */
 
 import React, {
@@ -11,6 +10,7 @@ import React, {
   useRef,
   useEffect,
 } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   createChart,
   IChartApi,
@@ -40,10 +40,13 @@ import {
   Activity,
   Plus,
   BarChart2,
+  RefreshCw,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTrading } from '@/contexts/TradingContext';
 import { formatCurrency } from '@/utils/format';
+import { marketApi } from '@/services/api';
+import type { Bar as ApiBar } from '@/services/api';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -52,6 +55,21 @@ type ChartType = 'candlestick' | 'line' | 'area';
 type MAToggle = '20EMA' | '50EMA' | '200SMA';
 
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1H', '4H', '1D', '1W', '1M', '1Y', 'All'];
+
+// ── Timeframe → API params mapping ────────────────────────────
+
+const TF_MAP: Record<Timeframe, { apiTf: string; limit: number }> = {
+  '1m':  { apiTf: '1Min',   limit: 390 },
+  '5m':  { apiTf: '5Min',   limit: 390 },
+  '15m': { apiTf: '15Min',  limit: 200 },
+  '1H':  { apiTf: '1Hour',  limit: 200 },
+  '4H':  { apiTf: '4Hour',  limit: 200 },
+  '1D':  { apiTf: '1Day',   limit: 365 },
+  '1W':  { apiTf: '1Week',  limit: 104 },
+  '1M':  { apiTf: '1Month', limit: 60  },
+  '1Y':  { apiTf: '1Day',   limit: 365 },
+  'All': { apiTf: '1Month', limit: 120 },
+};
 
 // ── Chart color scheme ────────────────────────────────────────
 
@@ -86,35 +104,7 @@ const CHART_OPTIONS = {
   handleScale: true,
 } as const;
 
-// ── Mock Stock Universe ───────────────────────────────────────
-
-const TICKER_BASE: Record<string, { price: number; name: string }> = {
-  AAPL:  { price: 189.84, name: 'Apple Inc.' },
-  MSFT:  { price: 418.32, name: 'Microsoft Corp.' },
-  NVDA:  { price: 875.40, name: 'NVIDIA Corp.' },
-  TSLA:  { price: 248.42, name: 'Tesla Inc.' },
-  AMZN:  { price: 198.72, name: 'Amazon.com Inc.' },
-  GOOGL: { price: 171.96, name: 'Alphabet Inc.' },
-  META:  { price: 571.28, name: 'Meta Platforms' },
-  JPM:   { price: 224.58, name: 'JPMorgan Chase' },
-  V:     { price: 289.34, name: 'Visa Inc.' },
-  BRK:   { price: 452.80, name: 'Berkshire Hathaway' },
-  SPY:   { price: 531.20, name: 'SPDR S&P 500 ETF' },
-  QQQ:   { price: 468.12, name: 'Invesco QQQ Trust' },
-  GLD:   { price: 238.40, name: 'SPDR Gold Trust ETF' },
-};
-
-// ── Seeded PRNG ────────────────────────────────────────────────
-
-function seededRng(seed: number) {
-  let s = seed >>> 0;
-  return () => {
-    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
-    return s / 0x100000000;
-  };
-}
-
-// ── Mock Candle Generator ─────────────────────────────────────
+// ── Internal OHLCV bar ────────────────────────────────────────
 
 interface OHLCVBar {
   time: number; // unix seconds
@@ -125,47 +115,15 @@ interface OHLCVBar {
   volume: number;
 }
 
-function generateMockCandles(ticker: string, timeframe: Timeframe): OHLCVBar[] {
-  const base = TICKER_BASE[ticker.toUpperCase()]?.price ?? 150;
-  const tickerSeed = ticker.split('').reduce((acc, c, i) => acc + c.charCodeAt(0) * (i + 1), 0);
-  const tfSeed = timeframe.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-  const rng = seededRng((tickerSeed * 31 + tfSeed) & 0x7fffffff);
-
-  // Bar count and interval in seconds
-  const config: Record<Timeframe, { count: number; intervalSec: number }> = {
-    '1m':  { count: 390,  intervalSec: 60 },
-    '5m':  { count: 288,  intervalSec: 300 },
-    '15m': { count: 200,  intervalSec: 900 },
-    '1H':  { count: 500,  intervalSec: 3600 },
-    '4H':  { count: 300,  intervalSec: 14400 },
-    '1D':  { count: 365,  intervalSec: 86400 },
-    '1W':  { count: 104,  intervalSec: 604800 },
-    '1M':  { count: 48,   intervalSec: 2592000 },
-    '1Y':  { count: 10,   intervalSec: 31536000 },
-    'All': { count: 500,  intervalSec: 86400 },
-  };
-
-  const { count, intervalSec } = config[timeframe];
-  const refTime = Math.floor(new Date('2026-05-26T20:00:00Z').getTime() / 1000);
-
-  const bars: OHLCVBar[] = [];
-  let price = base * (0.75 + rng() * 0.20);
-
-  for (let i = 0; i < count; i++) {
-    const volatility = 0.010 + rng() * 0.012;
-    const drift = (rng() - 0.47) * 0.002;
-    const open = price;
-    const close = Math.max(0.01, open * (1 + drift + (rng() - 0.5) * volatility));
-    const high = Math.max(open, close) * (1 + rng() * 0.004);
-    const low = Math.min(open, close) * (1 - rng() * 0.004);
-    const volume = Math.round(1_500_000 + rng() * 30_000_000);
-    const t = refTime - (count - 1 - i) * intervalSec;
-
-    bars.push({ time: t, open, high, low, close, volume });
-    price = close;
-  }
-
-  return bars;
+function apiBarsToOHLCV(bars: ApiBar[]): OHLCVBar[] {
+  return bars.map((b) => ({
+    time: Math.floor(new Date(b.t).getTime() / 1000),
+    open: b.o,
+    high: b.h,
+    low: b.l,
+    close: b.c,
+    volume: b.v,
+  })).sort((a, b) => a.time - b.time);
 }
 
 // ── Compute EMA/SMA ───────────────────────────────────────────
@@ -238,37 +196,21 @@ function computeMACD(closes: number[]): {
   return { macd, signal, hist };
 }
 
-// ── SearchBar ─────────────────────────────────────────────────
-
-interface StockResult { ticker: string; name: string; price: number; }
-
-const SEARCH_STOCKS: StockResult[] = Object.entries(TICKER_BASE).map(([t, v]) => ({
-  ticker: t, name: v.name, price: v.price,
-}));
-
-function searchTickers(query: string): StockResult[] {
-  if (!query.trim()) return [];
-  const q = query.toLowerCase();
-  return SEARCH_STOCKS.filter(
-    (s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
-  ).slice(0, 8);
-}
-
 // ── Charts Page ───────────────────────────────────────────────
 
 export default function Charts() {
   const { setSelectedTicker, addToWatchlist } = useTrading();
   const navigate = useNavigate();
 
-  const [ticker, setTicker]                 = useState('AAPL');
-  const [searchInput, setSearchInput]       = useState('');
-  const [searchResults, setSearchResults]   = useState<StockResult[]>([]);
-  const [showSearch, setShowSearch]         = useState(false);
-  const [timeframe, setTimeframe]           = useState<Timeframe>('1D');
-  const [chartType, setChartType]           = useState<ChartType>('candlestick');
-  const [activeMA, setActiveMA]             = useState<Set<MAToggle>>(new Set(['20EMA']));
-  const [showRSI, setShowRSI]               = useState(false);
-  const [showMACD, setShowMACD]             = useState(false);
+  const [ticker, setTicker]               = useState('');
+  const [searchInput, setSearchInput]     = useState('');
+  const [searchResults, setSearchResults] = useState<Array<{ symbol: string; name: string; type: string }>>([]);
+  const [showSearch, setShowSearch]       = useState(false);
+  const [timeframe, setTimeframe]         = useState<Timeframe>('1D');
+  const [chartType, setChartType]         = useState<ChartType>('candlestick');
+  const [activeMA, setActiveMA]           = useState<Set<MAToggle>>(new Set(['20EMA']));
+  const [showRSI, setShowRSI]             = useState(false);
+  const [showMACD, setShowMACD]           = useState(false);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const volumeContainerRef = useRef<HTMLDivElement>(null);
@@ -277,10 +219,38 @@ export default function Charts() {
   const volumeChartRef  = useRef<IChartApi | null>(null);
   const maSeriesRefs    = useRef<ISeriesApi<'Line'>[]>([]);
   const searchRef       = useRef<HTMLDivElement>(null);
+  const searchDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const tickerInfo = TICKER_BASE[ticker.toUpperCase()] ?? { price: 150, name: ticker };
+  const { apiTf, limit } = TF_MAP[timeframe];
 
-  const candles = useMemo(() => generateMockCandles(ticker, timeframe), [ticker, timeframe]);
+  // ── Fetch bars ────────────────────────────────────────────
+
+  const {
+    data: barsData,
+    isLoading: barsLoading,
+    isError: barsError,
+    refetch: refetchBars,
+  } = useQuery({
+    queryKey: ['bars', ticker, apiTf, limit],
+    queryFn: () => marketApi.getBars(ticker, apiTf, limit),
+    enabled: !!ticker,
+    staleTime: 30_000,
+  });
+
+  // ── Fetch quote for header ────────────────────────────────
+
+  const { data: quoteData } = useQuery({
+    queryKey: ['quote', ticker],
+    queryFn: () => marketApi.getQuote(ticker),
+    enabled: !!ticker,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+
+  const candles: OHLCVBar[] = useMemo(() => {
+    if (!barsData?.bars) return [];
+    return apiBarsToOHLCV(barsData.bars);
+  }, [barsData]);
 
   const closes  = useMemo(() => candles.map((c) => c.close), [candles]);
   const ema20   = useMemo(() => computeEMA(closes, 20), [closes]);
@@ -289,11 +259,10 @@ export default function Charts() {
   const rsiData = useMemo(() => computeRSI(closes), [closes]);
   const macdRes = useMemo(() => computeMACD(closes), [closes]);
 
-  const currentClose = candles[candles.length - 1]?.close ?? tickerInfo.price;
-  const firstOpen    = candles[0]?.open ?? currentClose;
-  const totalChg     = currentClose - firstOpen;
-  const totalChgPct  = firstOpen > 0 ? (totalChg / firstOpen) * 100 : 0;
-  const isGain       = totalChg >= 0;
+  const currentPrice = quoteData?.price ?? candles[candles.length - 1]?.close ?? 0;
+  const priceChange  = quoteData?.change ?? 0;
+  const priceChangePct = quoteData?.changePct ?? 0;
+  const isGain = priceChange >= 0;
 
   // ── Indicator chart data ──────────────────────────────────
 
@@ -316,9 +285,8 @@ export default function Charts() {
 
   useEffect(() => {
     const container = chartContainerRef.current;
-    if (!container) return;
+    if (!container || candles.length === 0) return;
 
-    // Destroy previous
     if (chartRef.current) {
       chartRef.current.remove();
       chartRef.current = null;
@@ -409,7 +377,6 @@ export default function Charts() {
 
     chart.timeScale().fitContent();
 
-    // Resize observer
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (entry && chartRef.current) {
@@ -424,12 +391,12 @@ export default function Charts() {
       chartRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker, timeframe, chartType]);
+  }, [candles, chartType]);
 
-  // Rebuild MA overlays when toggled (without full chart rebuild)
+  // Rebuild MA overlays when toggled
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
+    if (!chart || candles.length === 0) return;
 
     maSeriesRefs.current.forEach((s) => { try { chart.removeSeries(s); } catch { /* ignore */ } });
     maSeriesRefs.current = [];
@@ -459,7 +426,7 @@ export default function Charts() {
 
   useEffect(() => {
     const container = volumeContainerRef.current;
-    if (!container) return;
+    if (!container || candles.length === 0) return;
 
     if (volumeChartRef.current) {
       volumeChartRef.current.remove();
@@ -503,15 +470,24 @@ export default function Charts() {
       chart.remove();
       volumeChartRef.current = null;
     };
-  }, [ticker, timeframe]);
+  }, [candles]);
 
   // ── Search ────────────────────────────────────────────────
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchResults(searchTickers(searchInput));
-    }, 150);
-    return () => clearTimeout(t);
+    if (searchDebounce.current) clearTimeout(searchDebounce.current);
+    if (!searchInput.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    searchDebounce.current = setTimeout(async () => {
+      try {
+        const data = await marketApi.searchAssets(searchInput.trim());
+        setSearchResults(data.assets?.slice(0, 8) ?? []);
+      } catch {
+        setSearchResults([]);
+      }
+    }, 200);
   }, [searchInput]);
 
   // Close search on outside click
@@ -525,11 +501,11 @@ export default function Charts() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
-  function selectTicker(t: string) {
-    setTicker(t.toUpperCase());
+  function selectTicker(sym: string) {
+    setTicker(sym.toUpperCase());
     setSearchInput('');
     setShowSearch(false);
-    setSelectedTicker(t.toUpperCase());
+    setSelectedTicker(sym.toUpperCase());
   }
 
   const toggleMA = useCallback((ma: MAToggle) => {
@@ -541,15 +517,16 @@ export default function Charts() {
   }, []);
 
   function handleAddToWatchlist() {
-    const info = TICKER_BASE[ticker];
-    if (!info) return;
+    if (!ticker || !quoteData) return;
     addToWatchlist({
       ticker,
-      companyName: info.name,
-      price: currentClose,
-      change: totalChg,
-      changePct: totalChgPct,
-      volume: candles[candles.length - 1]?.volume ?? 0,
+      companyName: ticker,
+      price: quoteData.price,
+      change: quoteData.change,
+      changePct: quoteData.changePct,
+      volume: quoteData.volume,
+      high52: quoteData.high52,
+      low52: quoteData.low52,
     });
   }
 
@@ -559,6 +536,54 @@ export default function Charts() {
   }
 
   const Y_AXIS_WIDTH = 60;
+
+  // ── No symbol selected state ──────────────────────────────
+
+  if (!ticker) {
+    return (
+      <div className="min-h-screen bg-obsidian">
+        <div className="max-w-[1440px] mx-auto px-6 py-8 space-y-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div ref={searchRef} className="relative">
+              <div className="relative">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-off-white/30 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => { setSearchInput(e.target.value); setShowSearch(true); }}
+                  onFocus={() => setShowSearch(true)}
+                  placeholder="Search ticker…"
+                  className="w-48 pl-9 pr-3 py-2.5 bg-surface-2 border border-border rounded-lg text-sm text-off-white placeholder-off-white/25 focus:outline-none focus:border-gold/50 font-mono transition-colors"
+                />
+              </div>
+              {showSearch && searchResults.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-border bg-surface-2 shadow-surface-lg z-30 overflow-hidden">
+                  {searchResults.map((s) => (
+                    <button
+                      key={s.symbol}
+                      onClick={() => selectTicker(s.symbol)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-surface-3 transition-colors text-left border-b border-border last:border-0"
+                    >
+                      <div>
+                        <p className="text-sm font-mono font-semibold text-off-white">{s.symbol}</p>
+                        <p className="text-xs text-[#a09a8e] truncate max-w-[140px]">{s.name}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center justify-center py-32 gap-4">
+            <BarChart2 size={48} className="text-off-white/10" />
+            <p className="text-lg font-sans text-off-white/40">Search for a stock to view its chart</p>
+            <p className="text-sm font-sans text-off-white/20">Type a ticker symbol or company name above</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-obsidian">
@@ -587,15 +612,14 @@ export default function Charts() {
               <div className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-border bg-surface-2 shadow-surface-lg z-30 overflow-hidden">
                 {searchResults.map((s) => (
                   <button
-                    key={s.ticker}
-                    onClick={() => selectTicker(s.ticker)}
+                    key={s.symbol}
+                    onClick={() => selectTicker(s.symbol)}
                     className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-surface-3 transition-colors text-left border-b border-border last:border-0"
                   >
                     <div>
-                      <p className="text-sm font-mono font-semibold text-off-white">{s.ticker}</p>
+                      <p className="text-sm font-mono font-semibold text-off-white">{s.symbol}</p>
                       <p className="text-xs text-[#a09a8e] truncate max-w-[140px]">{s.name}</p>
                     </div>
-                    <p className="text-sm font-mono text-off-white">{formatCurrency(s.price)}</p>
                   </button>
                 ))}
               </div>
@@ -605,21 +629,25 @@ export default function Charts() {
           {/* Price display */}
           <div className="flex items-baseline gap-3 flex-wrap">
             <span className="font-mono text-xl font-bold text-gold">{ticker}</span>
-            <span className="text-off-white/50 text-sm hidden sm:inline">{tickerInfo.name}</span>
-            <span className="font-mono text-2xl font-semibold text-off-white tabular-nums">
-              {formatCurrency(currentClose)}
-            </span>
-            <span className={`text-sm font-mono font-semibold flex items-center gap-1 ${isGain ? 'text-gain' : 'text-loss'}`}>
-              {isGain ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-              {isGain ? '+' : ''}{totalChg.toFixed(2)} ({isGain ? '+' : ''}{totalChgPct.toFixed(2)}%)
-            </span>
+            {currentPrice > 0 && (
+              <>
+                <span className="font-mono text-2xl font-semibold text-off-white tabular-nums">
+                  {formatCurrency(currentPrice)}
+                </span>
+                <span className={`text-sm font-mono font-semibold flex items-center gap-1 ${isGain ? 'text-gain' : 'text-loss'}`}>
+                  {isGain ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                  {isGain ? '+' : ''}{priceChange.toFixed(2)} ({isGain ? '+' : ''}{priceChangePct.toFixed(2)}%)
+                </span>
+              </>
+            )}
           </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 ml-auto">
             <button
               onClick={handleAddToWatchlist}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-surface-2 text-xs font-semibold text-[#a09a8e] hover:text-off-white hover:bg-surface-3 transition-colors"
+              disabled={!quoteData}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-surface-2 text-xs font-semibold text-[#a09a8e] hover:text-off-white hover:bg-surface-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Plus size={13} /> Watchlist
             </button>
@@ -634,7 +662,6 @@ export default function Charts() {
 
         {/* ── Chart Type + Timeframe Row ─────────────────────── */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Chart type */}
           <div className="flex items-center gap-1 bg-surface-2 border border-border rounded-lg p-1">
             {(['candlestick', 'line', 'area'] as ChartType[]).map((ct) => (
               <button
@@ -649,7 +676,6 @@ export default function Charts() {
             ))}
           </div>
 
-          {/* Timeframe */}
           <div className="flex items-center gap-1 bg-surface-2 border border-border rounded-lg p-1">
             {TIMEFRAMES.map((tf) => (
               <button
@@ -713,26 +739,49 @@ export default function Charts() {
             <span className="text-sm font-medium text-off-white/60">
               {ticker} · {chartType.charAt(0).toUpperCase() + chartType.slice(1)} Chart
             </span>
-            <span className="text-xs text-off-white/30 ml-auto font-mono">{timeframe} · {candles.length} bars</span>
+            <span className="text-xs text-off-white/30 ml-auto font-mono">
+              {timeframe} · {candles.length} bars
+            </span>
           </div>
-          {/* Main chart: 80% of combined chart+volume */}
-          <div
-            ref={chartContainerRef}
-            style={{ height: 400, width: '100%' }}
-          />
+          {barsLoading ? (
+            <div className="h-[400px] w-full animate-pulse bg-surface-2" />
+          ) : barsError ? (
+            <div className="h-[400px] w-full flex flex-col items-center justify-center gap-3">
+              <p className="text-sm font-sans text-off-white/50">Unable to load chart data</p>
+              <button
+                onClick={() => refetchBars()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-surface-2 text-xs font-sans text-[#a09a8e] hover:text-off-white hover:border-gold/40 transition-colors"
+              >
+                <RefreshCw size={12} />
+                Retry
+              </button>
+            </div>
+          ) : candles.length === 0 ? (
+            <div className="h-[400px] w-full flex items-center justify-center">
+              <p className="text-sm font-sans text-off-white/40">No data available for this timeframe</p>
+            </div>
+          ) : (
+            <div ref={chartContainerRef} style={{ height: 400, width: '100%' }} />
+          )}
         </div>
 
         {/* ── Volume Chart ──────────────────────────────────── */}
-        <div className="card p-0 overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
-            <Activity size={14} className="text-off-white/40" />
-            <span className="text-sm font-medium text-off-white/60">Volume</span>
+        {candles.length > 0 && (
+          <div className="card p-0 overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
+              <Activity size={14} className="text-off-white/40" />
+              <span className="text-sm font-medium text-off-white/60">Volume</span>
+            </div>
+            {barsLoading ? (
+              <div className="h-[100px] w-full animate-pulse bg-surface-2" />
+            ) : (
+              <div ref={volumeContainerRef} style={{ height: 100, width: '100%' }} />
+            )}
           </div>
-          <div ref={volumeContainerRef} style={{ height: 100, width: '100%' }} />
-        </div>
+        )}
 
         {/* ── Technical Indicators ──────────────────────────── */}
-        {(showRSI || showMACD) && (
+        {candles.length > 0 && (showRSI || showMACD) && (
           <div className={`grid gap-5 ${showRSI && showMACD ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
             {showRSI && (
               <div className="card p-4">

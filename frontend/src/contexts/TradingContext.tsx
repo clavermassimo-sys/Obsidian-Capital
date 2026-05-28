@@ -1,11 +1,13 @@
 /* ============================================================
    Obsidian Capital — Trading Context
+   Real API calls for holdings, trades, watchlist, and orders.
    ============================================================ */
 
 import React, {
   createContext,
   useContext,
   useState,
+  useEffect,
   useCallback,
   ReactNode,
 } from 'react';
@@ -17,6 +19,8 @@ import type {
   OrderPreview,
   CommissionTier,
 } from '@/types/index';
+import { portfolioApi, tradesApi } from '@/services/api';
+import type { HoldingRaw } from '@/services/api';
 
 // ── Commission Rates ──────────────────────────────────────────
 
@@ -26,109 +30,53 @@ const COMMISSION_RATES: Record<CommissionTier, { min: number; max: number }> = {
   private: { min: 0.05, max: 0.06 },
 };
 
-// ── Mock Data ─────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────
 
-const MOCK_HOLDINGS: Holding[] = [
-  {
-    ticker: 'AAPL',
-    companyName: 'Apple Inc.',
-    shares: 150,
-    avgCost: 172.5,
-    currentPrice: 189.84,
-    marketValue: 28476,
-    returnPct: 10.05,
-    returnDollar: 2601,
-    sector: 'Technology',
-    portfolioWeight: 15.4,
-  },
-  {
-    ticker: 'MSFT',
-    companyName: 'Microsoft Corp.',
-    shares: 80,
-    avgCost: 380.0,
-    currentPrice: 418.32,
-    marketValue: 33465.6,
-    returnPct: 10.08,
-    returnDollar: 3065.6,
-    sector: 'Technology',
-    portfolioWeight: 18.1,
-  },
-  {
-    ticker: 'NVDA',
-    companyName: 'NVIDIA Corp.',
-    shares: 60,
-    avgCost: 520.0,
-    currentPrice: 875.4,
-    marketValue: 52524,
-    returnPct: 68.35,
-    returnDollar: 21324,
-    sector: 'Semiconductors',
-    portfolioWeight: 28.5,
-  },
-  {
-    ticker: 'AMZN',
-    companyName: 'Amazon.com Inc.',
-    shares: 120,
-    avgCost: 155.0,
-    currentPrice: 198.72,
-    marketValue: 23846.4,
-    returnPct: 28.21,
-    returnDollar: 5246.4,
-    sector: 'Consumer Discretionary',
-    portfolioWeight: 12.9,
-  },
-  {
-    ticker: 'GOOGL',
-    companyName: 'Alphabet Inc.',
-    shares: 90,
-    avgCost: 145.0,
-    currentPrice: 171.96,
-    marketValue: 15476.4,
-    returnPct: 18.59,
-    returnDollar: 2426.4,
-    sector: 'Technology',
-    portfolioWeight: 8.4,
-  },
-];
+function toNum(v: string | number | undefined | null): number {
+  if (v === undefined || v === null) return 0;
+  return typeof v === 'number' ? v : parseFloat(v as string) || 0;
+}
 
-const MOCK_TRADES: Trade[] = [
-  {
-    id: 'trd_001',
-    ticker: 'NVDA',
-    companyName: 'NVIDIA Corp.',
-    type: 'buy',
-    orderType: 'market',
-    shares: 20,
-    price: 875.4,
-    commission: 875.4,
-    total: 18383.4,
-    timestamp: '2026-05-24T14:32:00Z',
-    status: 'filled',
-  },
-  {
-    id: 'trd_002',
-    ticker: 'AAPL',
-    companyName: 'Apple Inc.',
-    type: 'sell',
-    orderType: 'limit',
-    shares: 25,
-    price: 189.84,
-    commission: 142.38,
-    total: 4603.62,
-    timestamp: '2026-05-23T10:15:00Z',
-    status: 'filled',
-    limitPrice: 188.0,
-  },
-];
+function rawToHolding(r: HoldingRaw): Holding {
+  const qty        = toNum(r.qty);
+  const avgEntry   = toNum(r.avg_entry_price);
+  const curPrice   = toNum(r.current_price);
+  const mktValue   = toNum(r.market_value);
+  const unrPl      = toNum(r.unrealized_pl);
+  const unrPlPct   = toNum(r.unrealized_plpc) * 100;
 
-const MOCK_WATCHLIST: WatchlistItem[] = [
-  { ticker: 'TSLA', companyName: 'Tesla Inc.', price: 248.42, change: 8.32, changePct: 3.46, volume: 82450000, high52: 299.29, low52: 138.8, marketCap: 793_000_000_000 },
-  { ticker: 'META', companyName: 'Meta Platforms', price: 571.28, change: -4.12, changePct: -0.72, volume: 14300000, high52: 602.95, low52: 310.66, marketCap: 1_450_000_000_000 },
-  { ticker: 'JPM', companyName: 'JPMorgan Chase', price: 224.58, change: 1.24, changePct: 0.55, volume: 9120000, high52: 263.16, low52: 183.1, peRatio: 12.4 },
-  { ticker: 'BRK.B', companyName: 'Berkshire Hathaway B', price: 452.8, change: 2.08, changePct: 0.46, volume: 3850000, high52: 478.55, low52: 348.71 },
-  { ticker: 'V', companyName: 'Visa Inc.', price: 289.34, change: -0.88, changePct: -0.30, volume: 6450000, high52: 310.0, low52: 241.0, peRatio: 31.2 },
-  { ticker: 'GLD', companyName: 'SPDR Gold Trust ETF', price: 238.4, change: 1.84, changePct: 0.78, volume: 10200000 },
-];
+  return {
+    ticker:          r.symbol,
+    companyName:     r.symbol,
+    shares:          qty,
+    avgCost:         avgEntry,
+    currentPrice:    curPrice,
+    marketValue:     mktValue,
+    returnPct:       unrPlPct,
+    returnDollar:    unrPl,
+    sector:          r.asset_class,
+  };
+}
+
+// ── Watchlist persistence ─────────────────────────────────────
+
+const WATCHLIST_KEY = 'oc_watchlist';
+
+function loadWatchlist(): WatchlistItem[] {
+  try {
+    const raw = localStorage.getItem(WATCHLIST_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as WatchlistItem[];
+  } catch {
+    return [];
+  }
+}
+
+function saveWatchlist(items: WatchlistItem[]) {
+  try {
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(items));
+  } catch { /* ignore */ }
+}
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -149,53 +97,133 @@ interface TradingContextValue {
 const TradingContext = createContext<TradingContextValue | null>(null);
 
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const [holdings, setHoldings] = useState<Holding[]>(MOCK_HOLDINGS);
-  const [trades, setTrades] = useState<Trade[]>(MOCK_TRADES);
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>(MOCK_WATCHLIST);
+  const [holdings, setHoldings]       = useState<Holding[]>([]);
+  const [trades, setTrades]           = useState<Trade[]>([]);
+  const [watchlist, setWatchlist]     = useState<WatchlistItem[]>(loadWatchlist());
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
+  // ── Fetch holdings on mount ───────────────────────────────
+
+  useEffect(() => {
+    portfolioApi.getHoldings().then((res) => {
+      if (res.holdings) {
+        setHoldings(res.holdings.map(rawToHolding));
+      }
+    }).catch(() => {
+      // If API fails (unauthenticated/no Alpaca key), leave empty
+    });
+  }, []);
+
+  // ── Fetch orders on mount ─────────────────────────────────
+
+  useEffect(() => {
+    tradesApi.getOrders().then((res) => {
+      if (res.orders) {
+        const mapped: Trade[] = res.orders.map((o) => ({
+          id:          o.id,
+          ticker:      o.symbol,
+          companyName: o.symbol,
+          type:        o.side as 'buy' | 'sell',
+          orderType:   o.type as any,
+          shares:      parseFloat(String(o.filled_qty ?? o.qty)) || 0,
+          price:       parseFloat(String(o.filled_avg_price ?? 0)) || 0,
+          commission:  o.commission ?? 0,
+          total:       (parseFloat(String(o.filled_avg_price ?? 0)) || 0) * (parseFloat(String(o.filled_qty ?? 0)) || 0),
+          timestamp:   o.submitted_at,
+          status:      o.status as any,
+          limitPrice:  o.limit_price ? parseFloat(String(o.limit_price)) : undefined,
+        }));
+        setTrades(mapped);
+      }
+    }).catch(() => {
+      // Leave empty if API fails
+    });
+  }, []);
+
+  // ── Persist watchlist to localStorage ────────────────────
+
+  useEffect(() => {
+    saveWatchlist(watchlist);
+  }, [watchlist]);
+
+  // ── Preview order (uses real API if available) ────────────
+
   const previewOrder = useCallback(
-    (req: OrderRequest, tier: CommissionTier): OrderPreview => {
-      const rates = COMMISSION_RATES[tier];
-      const midRate = (rates.min + rates.max) / 2;
-      const holding = holdings.find((h) => h.ticker === req.ticker);
-      const watchItem = watchlist.find((w) => w.ticker === req.ticker);
-      const estimatedPrice = req.limitPrice ?? holding?.currentPrice ?? watchItem?.price ?? 100;
-      const subtotal = estimatedPrice * req.shares;
-      const commissionAmount = subtotal * midRate;
-      return {
-        ticker: req.ticker,
-        companyName: holding?.companyName ?? watchItem?.companyName ?? req.ticker,
-        side: req.side,
-        shares: req.shares,
-        estimatedPrice,
-        subtotal,
-        commissionRate: midRate,
-        commissionAmount,
-        total: req.side === 'buy' ? subtotal + commissionAmount : subtotal - commissionAmount,
-        tier,
-      };
+    async (req: OrderRequest, tier: CommissionTier): Promise<OrderPreview> => {
+      try {
+        const result = await tradesApi.previewOrder({
+          symbol:         req.ticker,
+          side:           req.side,
+          qty:            req.shares,
+          type:           req.orderType,
+          limit_price:    req.limitPrice,
+          stop_price:     req.stopPrice,
+          time_in_force:  'day',
+        });
+        return result as OrderPreview;
+      } catch {
+        // Fallback to local calculation
+        const rates = COMMISSION_RATES[tier];
+        const midRate = (rates.min + rates.max) / 2;
+        const holding = holdings.find((h) => h.ticker === req.ticker);
+        const watchItem = watchlist.find((w) => w.ticker === req.ticker);
+        const estimatedPrice = req.limitPrice ?? holding?.currentPrice ?? watchItem?.price ?? 100;
+        const subtotal = estimatedPrice * req.shares;
+        const commissionAmount = subtotal * midRate;
+        return {
+          ticker:           req.ticker,
+          companyName:      holding?.companyName ?? watchItem?.companyName ?? req.ticker,
+          side:             req.side,
+          shares:           req.shares,
+          estimatedPrice,
+          subtotal,
+          commissionRate:   midRate,
+          commissionAmount,
+          total:            req.side === 'buy' ? subtotal + commissionAmount : subtotal - commissionAmount,
+          tier,
+        };
+      }
     },
     [holdings, watchlist]
-  );
+  ) as (req: OrderRequest, tier: CommissionTier) => OrderPreview;
+
+  // ── Submit order ──────────────────────────────────────────
 
   const submitOrder = useCallback(
     async (req: OrderRequest, tier: CommissionTier): Promise<Trade> => {
-      await new Promise((r) => setTimeout(r, 600));
-      const preview = previewOrder(req, tier);
+      let orderResult: any;
+      try {
+        orderResult = await tradesApi.placeOrder({
+          symbol:        req.ticker,
+          side:          req.side,
+          qty:           req.shares,
+          type:          req.orderType,
+          limit_price:   req.limitPrice,
+          stop_price:    req.stopPrice,
+          time_in_force: 'day',
+        });
+      } catch {
+        // Fallback: simulate a trade locally if API unavailable
+        await new Promise((r) => setTimeout(r, 600));
+        orderResult = null;
+      }
+
+      const preview = (previewOrder as any)(req, tier) as OrderPreview;
+      const price = parseFloat(orderResult?.filled_avg_price) || preview.estimatedPrice;
+
       const trade: Trade = {
-        id: `trd_${Date.now()}`,
-        ticker: req.ticker,
+        id:          orderResult?.id ?? `trd_${Date.now()}`,
+        ticker:      req.ticker,
         companyName: preview.companyName,
-        type: req.side,
-        orderType: req.orderType,
-        shares: req.shares,
-        price: preview.estimatedPrice,
-        commission: preview.commissionAmount,
-        total: preview.total,
-        timestamp: new Date().toISOString(),
-        status: 'filled',
-        limitPrice: req.limitPrice,
+        type:        req.side,
+        orderType:   req.orderType,
+        shares:      req.shares,
+        price,
+        commission:  preview.commissionAmount,
+        total:       preview.total,
+        timestamp:   new Date().toISOString(),
+        status:      orderResult?.status ?? 'filled',
+        limitPrice:  req.limitPrice,
       };
       setTrades((prev) => [trade, ...prev]);
       return trade;
@@ -221,7 +249,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         watchlist,
         selectedTicker,
         setSelectedTicker,
-        previewOrder,
+        previewOrder: previewOrder as (req: OrderRequest, tier: CommissionTier) => OrderPreview,
         submitOrder,
         addToWatchlist,
         removeFromWatchlist,

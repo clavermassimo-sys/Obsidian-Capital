@@ -100,7 +100,7 @@ function GemLogo({ size = 64 }: { size?: number }) {
 
 function HeroSection({ onCTA }: { onCTA: (path: string) => void }) {
   return (
-    <section className="relative min-h-screen flex items-center justify-center overflow-hidden px-6 py-24">
+    <section className="relative min-h-screen flex items-center justify-center overflow-hidden px-4 md:px-6 py-16 md:py-24">
       {/* Background grid */}
       <div
         className="absolute inset-0 opacity-[0.03]"
@@ -123,25 +123,25 @@ function HeroSection({ onCTA }: { onCTA: (path: string) => void }) {
 
       <div className="relative z-10 max-w-5xl mx-auto text-center">
         {/* Logo */}
-        <div className="flex justify-center mb-8">
+        <div className="flex justify-center mb-6 md:mb-8">
           <div
-            className="p-6 rounded-2xl"
+            className="p-4 md:p-6 rounded-2xl"
             style={{ background: 'rgba(201,168,76,0.04)', border: '1px solid rgba(201,168,76,0.15)' }}
           >
-            <GemLogo size={72} />
+            <GemLogo size={56} />
           </div>
         </div>
 
         {/* Brand name */}
-        <p className="text-xs font-bold tracking-[0.4em] text-gold uppercase mb-6 font-sans">
+        <p className="text-xs font-bold tracking-[0.3em] md:tracking-[0.4em] text-gold uppercase mb-4 md:mb-6 font-sans">
           OBSIDIAN CAPITAL
         </p>
 
         {/* Headline */}
         <h1
-          className="font-serif font-medium leading-tight mb-6"
+          className="font-serif font-medium leading-tight mb-4 md:mb-6"
           style={{
-            fontSize: 'clamp(2.5rem, 6vw, 5rem)',
+            fontSize: 'clamp(2rem, 6vw, 5rem)',
             background: 'linear-gradient(135deg, #f0ede8 0%, #c9a84c 40%, #e8c96e 60%, #f0ede8 100%)',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent',
@@ -152,19 +152,19 @@ function HeroSection({ onCTA }: { onCTA: (path: string) => void }) {
         </h1>
 
         {/* Subheadline */}
-        <p className="text-lg text-off-white/60 max-w-2xl mx-auto mb-4 font-sans leading-relaxed">
+        <p className="text-base md:text-lg text-off-white/60 max-w-2xl mx-auto mb-3 md:mb-4 font-sans leading-relaxed">
           A new standard in private brokerage. Commission-based trading engineered for
           discerning investors who demand sophistication, transparency, and elite access.
         </p>
-        <p className="text-sm text-off-white/40 max-w-xl mx-auto mb-12 font-sans">
+        <p className="text-xs md:text-sm text-off-white/40 max-w-xl mx-auto mb-8 md:mb-12 font-sans">
           Washington, D.C. · Founded 2026 · SIPC Protected · SEC Regulated
         </p>
 
-        {/* CTAs */}
-        <div className="flex flex-wrap items-center justify-center gap-4">
+        {/* CTAs — full width on mobile */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 md:gap-4 max-w-sm sm:max-w-none mx-auto">
           <button
             onClick={() => onCTA('/register')}
-            className="group inline-flex items-center gap-2.5 px-8 py-3.5 rounded-xl text-sm font-semibold
+            className="group inline-flex items-center justify-center gap-2.5 px-8 py-3.5 rounded-xl text-sm font-semibold
                        text-obsidian transition-all duration-250 active:scale-[0.98]"
             style={{
               background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)',
@@ -177,7 +177,7 @@ function HeroSection({ onCTA }: { onCTA: (path: string) => void }) {
 
           <button
             onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })}
-            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-semibold
+            className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl text-sm font-semibold
                        text-off-white border border-border hover:border-gold/40 hover:text-gold
                        transition-all duration-250 bg-surface/50 backdrop-blur-sm"
           >
@@ -186,8 +186,8 @@ function HeroSection({ onCTA }: { onCTA: (path: string) => void }) {
           </button>
         </div>
 
-        {/* Scroll indicator */}
-        <div className="mt-20 flex justify-center opacity-30">
+        {/* Scroll indicator — hidden on small mobile */}
+        <div className="mt-12 md:mt-20 hidden sm:flex justify-center opacity-30">
           <div className="flex flex-col items-center gap-2">
             <div className="w-px h-12 bg-gradient-to-b from-transparent to-gold" />
             <div className="w-1.5 h-1.5 rounded-full bg-gold animate-pulse" />
@@ -209,12 +209,12 @@ const STATS = [
 
 function StatsBar() {
   return (
-    <section className="py-12 px-6 border-y border-border relative overflow-hidden">
+    <section className="py-8 md:py-12 px-4 md:px-6 border-y border-border relative overflow-hidden">
       <div
         className="absolute inset-0 opacity-5"
         style={{ background: 'linear-gradient(90deg, transparent, rgba(201,168,76,0.3), transparent)' }}
       />
-      <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
+      <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
         {STATS.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -281,21 +281,21 @@ const FEATURES = [
 
 function FeaturesSection() {
   return (
-    <section id="features" className="py-24 px-6">
+    <section id="features" className="py-16 md:py-24 px-4 md:px-6">
       <div className="max-w-5xl mx-auto">
         {/* Section header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-10 md:mb-16">
           <p className="text-xs font-bold tracking-[0.3em] text-gold uppercase mb-3 font-sans">
             PLATFORM FEATURES
           </p>
-          <h2 className="font-serif text-4xl font-medium text-off-white mb-4">
+          <h2 className="font-serif text-2xl md:text-4xl font-medium text-off-white mb-4">
             Built for Serious Investors
           </h2>
           <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold to-transparent mx-auto" />
         </div>
 
-        {/* Feature cards */}
-        <div className="grid md:grid-cols-3 gap-6">
+        {/* Feature cards — single col on mobile */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
           {FEATURES.map((feature) => {
             const Icon = feature.icon;
             return (
@@ -376,13 +376,13 @@ const COMMISSION_TIERS = [
 
 function CommissionTable() {
   return (
-    <section className="py-24 px-6 bg-surface/30">
+    <section className="py-16 md:py-24 px-4 md:px-6 bg-surface/30">
       <div className="max-w-5xl mx-auto">
-        <div className="text-center mb-16">
+        <div className="text-center mb-10 md:mb-16">
           <p className="text-xs font-bold tracking-[0.3em] text-gold uppercase mb-3 font-sans">
             TRANSPARENT PRICING
           </p>
-          <h2 className="font-serif text-4xl font-medium text-off-white mb-4">
+          <h2 className="font-serif text-2xl md:text-4xl font-medium text-off-white mb-4">
             Commission Tiers
           </h2>
           <p className="text-off-white/50 max-w-xl mx-auto text-sm">
@@ -391,8 +391,9 @@ function CommissionTable() {
           <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold to-transparent mx-auto mt-4" />
         </div>
 
-        {/* Tier cards */}
-        <div className="grid md:grid-cols-3 gap-6">
+        {/* Tier cards — horizontally scrollable on mobile */}
+        <div className="overflow-x-auto -mx-4 md:mx-0 px-4 md:px-0 scrollbar-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 min-w-[280px]">
           {COMMISSION_TIERS.map((tier) => (
             <div
               key={tier.tier}
@@ -471,6 +472,7 @@ function CommissionTable() {
             </div>
           ))}
         </div>
+        </div>
       </div>
     </section>
   );
@@ -486,15 +488,15 @@ const LEADERSHIP = [
 
 function AboutSection() {
   return (
-    <section className="py-24 px-6">
+    <section className="py-16 md:py-24 px-4 md:px-6">
       <div className="max-w-5xl mx-auto">
-        <div className="grid md:grid-cols-2 gap-16 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 md:gap-16 items-start">
           {/* Left: About text */}
           <div>
             <p className="text-xs font-bold tracking-[0.3em] text-gold uppercase mb-3 font-sans">
               ABOUT US
             </p>
-            <h2 className="font-serif text-4xl font-medium text-off-white mb-6 leading-tight">
+            <h2 className="font-serif text-2xl md:text-4xl font-medium text-off-white mb-4 md:mb-6 leading-tight">
               A New Standard in<br />Private Brokerage
             </h2>
             <div className="w-12 h-px bg-gold mb-8" />
@@ -603,21 +605,21 @@ function PersonSilhouette() {
 
 function LeadershipSection() {
   return (
-    <section className="py-24 px-6 bg-surface/20">
+    <section className="py-16 md:py-24 px-4 md:px-6 bg-surface/20">
       <div className="max-w-5xl mx-auto">
         {/* Section header */}
-        <div className="text-center mb-16">
+        <div className="text-center mb-10 md:mb-16">
           <p className="text-xs font-bold tracking-[0.3em] text-gold uppercase mb-3 font-sans">
             LEADERSHIP
           </p>
-          <h2 className="font-serif text-4xl font-medium text-off-white mb-4">
+          <h2 className="font-serif text-2xl md:text-4xl font-medium text-off-white mb-4">
             The Team Behind Obsidian
           </h2>
           <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold to-transparent mx-auto" />
         </div>
 
-        {/* Leader cards */}
-        <div className="grid md:grid-cols-3 gap-6">
+        {/* Leader cards — single col on mobile */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
           {LEADERS.map((leader) => (
             <div
               key={leader.lastName}
@@ -665,7 +667,7 @@ function LeadershipSection() {
 
 function CTASection({ onCTA }: { onCTA: (path: string) => void }) {
   return (
-    <section className="py-24 px-6 relative overflow-hidden">
+    <section className="py-16 md:py-24 px-4 md:px-6 relative overflow-hidden">
       <div
         className="absolute inset-0"
         style={{
@@ -673,20 +675,21 @@ function CTASection({ onCTA }: { onCTA: (path: string) => void }) {
         }}
       />
       <div className="relative z-10 max-w-3xl mx-auto text-center">
-        <div className="flex justify-center mb-8">
+        <div className="flex justify-center mb-6 md:mb-8">
           <GemLogo size={48} />
         </div>
-        <h2 className="font-serif text-4xl font-medium text-off-white mb-4">
+        <h2 className="font-serif text-2xl md:text-4xl font-medium text-off-white mb-4">
           Ready to Trade with Obsidian?
         </h2>
-        <p className="text-off-white/50 text-sm mb-10 max-w-lg mx-auto leading-relaxed">
+        <p className="text-off-white/50 text-sm mb-8 md:mb-10 max-w-lg mx-auto leading-relaxed">
           Join a select community of investors who have elevated their approach.
           Open your account in minutes and start trading with confidence.
         </p>
-        <div className="flex flex-wrap gap-4 justify-center">
+        {/* Full-width buttons on mobile */}
+        <div className="flex flex-col sm:flex-row gap-3 md:gap-4 justify-center max-w-sm sm:max-w-none mx-auto">
           <button
             onClick={() => onCTA('/register')}
-            className="group inline-flex items-center gap-2.5 px-10 py-4 rounded-xl text-sm font-semibold
+            className="group inline-flex items-center justify-center gap-2.5 px-8 md:px-10 py-4 rounded-xl text-sm font-semibold
                        text-obsidian transition-all duration-250 active:scale-[0.98]"
             style={{
               background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)',
@@ -698,7 +701,7 @@ function CTASection({ onCTA }: { onCTA: (path: string) => void }) {
           </button>
           <button
             onClick={() => onCTA('/login')}
-            className="inline-flex items-center gap-2 px-10 py-4 rounded-xl text-sm font-semibold
+            className="inline-flex items-center justify-center gap-2 px-8 md:px-10 py-4 rounded-xl text-sm font-semibold
                        text-off-white/70 border border-border hover:border-gold/30 hover:text-off-white
                        transition-all duration-250 bg-surface/50"
           >
@@ -778,30 +781,34 @@ export default function Landing() {
   return (
     <div className="min-h-screen bg-obsidian font-sans">
       {/* Top nav bar */}
-      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-8 h-16"
+      <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 md:px-8 h-14 md:h-16"
         style={{ background: 'rgba(10,10,10,0.9)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(42,42,42,0.8)' }}
       >
-        <div className="flex items-center gap-3">
-          <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
+        <div className="flex items-center gap-2 md:gap-3">
+          <svg width="24" height="24" viewBox="0 0 40 40" fill="none">
             <polygon points="20,2 36,11 36,29 20,38 4,29 4,11" fill="none" stroke="#c9a84c" strokeWidth="1.5" />
             <polygon points="20,7 32,14 32,26 20,33 8,26 8,14" fill="rgba(201,168,76,0.08)" stroke="#c9a84c" strokeWidth="0.75" />
             <circle cx="20" cy="20" r="2" fill="#c9a84c" />
           </svg>
-          <span className="text-xs font-bold tracking-[0.25em] text-gold uppercase font-sans">OBSIDIAN CAPITAL</span>
+          <span className="text-xs font-bold tracking-[0.2em] md:tracking-[0.25em] text-gold uppercase font-sans">
+            <span className="hidden sm:inline">OBSIDIAN CAPITAL</span>
+            <span className="sm:hidden">OBSIDIAN</span>
+          </span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => handleCTA('/login')}
-            className="text-xs font-medium text-off-white/60 hover:text-off-white transition-colors px-4 py-2"
+            className="tap-target text-xs font-medium text-off-white/60 hover:text-off-white transition-colors px-3 py-2"
           >
             Sign In
           </button>
           <button
             onClick={() => handleCTA('/register')}
-            className="text-xs font-semibold text-obsidian px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98]"
+            className="tap-target text-xs font-semibold text-obsidian px-3 md:px-4 py-2 rounded-lg transition-all duration-200 active:scale-[0.98]"
             style={{ background: 'linear-gradient(135deg, #c9a84c, #e8c96e)' }}
           >
-            Open Account
+            <span className="hidden sm:inline">Open Account</span>
+            <span className="sm:hidden">Open</span>
           </button>
         </div>
       </header>

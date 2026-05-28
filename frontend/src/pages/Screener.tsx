@@ -1,8 +1,11 @@
 /* ============================================================
    Obsidian Capital — Stock Screener Page
+   Real asset universe fetched from the API.
    ============================================================ */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { marketApi } from '@/services/api';
 import {
   Search,
   Filter,
@@ -41,34 +44,7 @@ interface Filters {
   volumeMin: string;
 }
 
-// ── Mock Stock Universe (25 stocks) ───────────────────────────
-
-const MOCK_STOCKS: Stock[] = [
-  { ticker: 'AAPL',  company: 'Apple Inc',           sector: 'Technology',              price: 178.50, changePct:  1.24, marketCap: 2940, pe: 28.4, volume: 62.3 },
-  { ticker: 'MSFT',  company: 'Microsoft Corp',       sector: 'Technology',              price: 415.20, changePct:  0.87, marketCap: 3080, pe: 35.2, volume: 21.1 },
-  { ticker: 'GOOGL', company: 'Google (Alphabet)',    sector: 'Technology',              price: 172.30, changePct:  1.56, marketCap: 2180, pe: 24.8, volume: 18.9 },
-  { ticker: 'AMZN',  company: 'Amazon.com',           sector: 'Consumer Discretionary',  price: 198.40, changePct:  2.31, marketCap: 2090, pe: 43.1, volume: 35.7 },
-  { ticker: 'NVDA',  company: 'NVIDIA Corp',          sector: 'Technology',              price: 875.60, changePct:  3.42, marketCap: 2150, pe: 65.3, volume: 45.8 },
-  { ticker: 'META',  company: 'Meta Platforms',       sector: 'Communication Services',  price: 521.30, changePct:  1.87, marketCap: 1350, pe: 26.7, volume: 14.2 },
-  { ticker: 'TSLA',  company: 'Tesla Inc',            sector: 'Consumer Discretionary',  price: 248.90, changePct: -1.23, marketCap:  790, pe: 68.4, volume: 88.2 },
-  { ticker: 'UNH',   company: 'UnitedHealth Grp',     sector: 'Healthcare',              price: 582.40, changePct: -0.45, marketCap:  540, pe: 22.1, volume:  3.4 },
-  { ticker: 'JNJ',   company: 'Johnson & Johnson',    sector: 'Healthcare',              price: 158.30, changePct:  0.23, marketCap:  381, pe: 15.8, volume:  7.2 },
-  { ticker: 'V',     company: 'Visa Inc',             sector: 'Finance',                 price: 282.10, changePct:  0.67, marketCap:  576, pe: 30.4, volume:  7.1 },
-  { ticker: 'MA',    company: 'Mastercard',           sector: 'Finance',                 price: 472.80, changePct:  0.89, marketCap:  436, pe: 35.7, volume:  3.2 },
-  { ticker: 'JPM',   company: 'JPMorgan Chase',       sector: 'Finance',                 price: 215.40, changePct: -0.34, marketCap:  614, pe: 12.4, volume: 10.8 },
-  { ticker: 'BAC',   company: 'Bank of America',      sector: 'Finance',                 price:  38.70, changePct: -0.52, marketCap:  305, pe: 11.3, volume: 42.6 },
-  { ticker: 'XOM',   company: 'Exxon Mobil',          sector: 'Energy',                  price: 110.20, changePct:  1.12, marketCap:  440, pe: 14.2, volume: 16.3 },
-  { ticker: 'CVX',   company: 'Chevron Corp',         sector: 'Energy',                  price: 153.80, changePct:  0.78, marketCap:  280, pe: 13.8, volume:  9.7 },
-  { ticker: 'PFE',   company: 'Pfizer Inc',           sector: 'Healthcare',              price:  27.40, changePct: -0.89, marketCap:  155, pe:  8.9, volume: 54.3 },
-  { ticker: 'HD',    company: 'Home Depot',           sector: 'Consumer Discretionary',  price: 368.90, changePct:  0.56, marketCap:  366, pe: 22.4, volume:  3.8 },
-  { ticker: 'WMT',   company: 'Walmart Inc',          sector: 'Consumer Staples',        price:  72.30, changePct:  0.34, marketCap:  580, pe: 29.1, volume: 16.7 },
-  { ticker: 'PEP',   company: 'PepsiCo Inc',          sector: 'Consumer Staples',        price: 172.40, changePct: -0.23, marketCap:  237, pe: 24.3, volume:  5.4 },
-  { ticker: 'KO',    company: 'Coca-Cola Co',         sector: 'Consumer Staples',        price:  62.80, changePct:  0.45, marketCap:  271, pe: 23.7, volume:  9.8 },
-  { ticker: 'DIS',   company: 'Walt Disney Co',       sector: 'Communication Services',  price: 112.30, changePct: -0.67, marketCap:  206, pe: 42.3, volume: 12.1 },
-  { ticker: 'NFLX',  company: 'Netflix Inc',          sector: 'Communication Services',  price: 712.40, changePct:  2.14, marketCap:  306, pe: 44.7, volume:  4.1 },
-  { ticker: 'INTC',  company: 'Intel Corp',           sector: 'Technology',              price:  32.10, changePct: -1.45, marketCap:  136, pe: 18.2, volume: 41.3 },
-  { ticker: 'AMD',   company: 'Advanced Micro',       sector: 'Technology',              price: 164.80, changePct:  2.87, marketCap:  267, pe: 38.9, volume: 42.7 },
-];
+// (No mock stock data — populated from API in the component below)
 
 const ALL_SECTORS = [
   'Technology',
@@ -184,10 +160,40 @@ export default function Screener() {
   // Row-click toast
   const [toast, setToast] = useState<string | null>(null);
 
+  // ── Fetch top 100 active assets + quotes ─────────────────
+
+  const { data: searchData, isLoading: assetsLoading } = useQuery({
+    queryKey: ['screener-assets'],
+    queryFn: async () => {
+      // Fetch a set of popular large-cap tickers via search
+      const popular = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'TSLA', 'META', 'JPM', 'V', 'XOM',
+                       'UNH', 'JNJ', 'WMT', 'PG', 'MA', 'BAC', 'HD', 'PFE', 'COST', 'ABBV',
+                       'KO', 'PEP', 'NFLX', 'INTC', 'AMD', 'DIS', 'QCOM', 'IBM', 'GE', 'F'];
+      const quotes = await Promise.all(
+        popular.map((sym) =>
+          marketApi.getQuote(sym).then((q) => ({
+            ticker:    sym,
+            company:   sym,
+            sector:    'N/A',
+            price:     q.price,
+            changePct: q.changePct,
+            marketCap: 0,
+            pe:        null as number | null,
+            volume:    q.volume / 1_000_000,
+          } as Stock)).catch(() => null)
+        )
+      );
+      return quotes.filter((q): q is Stock => q !== null);
+    },
+    staleTime: 60_000,
+  });
+
+  const allApiStocks: Stock[] = searchData ?? [];
+
   // ── Filter logic ────────────────────────────────────────────
 
   const filteredStocks = useMemo(() => {
-    return MOCK_STOCKS.filter((s) => {
+    return allApiStocks.filter((s) => {
       if (appliedFilters.sectors.size > 0 && !appliedFilters.sectors.has(s.sector)) return false;
       if (!matchesMarketCap(s.marketCap, appliedFilters.marketCap)) return false;
       if (appliedFilters.peMin !== '') {
@@ -313,18 +319,201 @@ export default function Screener() {
         </div>
       )}
 
-      <div className="max-w-[1440px] mx-auto px-6 py-8">
+      {/* ── Mobile filter bottom sheet ──────────────────────── */}
+      {showMobileFilters && (
+        <>
+          <div
+            className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowMobileFilters(false)}
+          />
+          <div className="md:hidden bottom-sheet z-50 overflow-hidden" style={{ maxHeight: '85vh' }}>
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-10 h-1 rounded-full bg-border" />
+            </div>
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Filter size={14} className="text-gold" />
+                <h2 className="text-sm font-semibold text-off-white">Filters</h2>
+                {activeFilterCount > 0 && (
+                  <span className="px-1.5 py-0.5 bg-gold/20 text-gold rounded text-xs font-semibold">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setShowMobileFilters(false)}
+                className="tap-target p-1.5 rounded-md text-off-white/40 hover:text-off-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4 space-y-5" style={{ maxHeight: 'calc(85vh - 80px)' }}>
+              {/* Sectors */}
+              <div>
+                <label className="block text-xs font-semibold text-off-white/40 uppercase tracking-wider mb-2.5">Sector</label>
+                <div className="flex flex-wrap gap-2">
+                  {ALL_SECTORS.map((sector) => {
+                    const checked = draftFilters.sectors.has(sector);
+                    return (
+                      <button
+                        key={sector}
+                        onClick={() => toggleSector(sector)}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          checked
+                            ? 'bg-gold/15 text-gold border-gold/30'
+                            : 'bg-surface-3 text-off-white/50 border-border'
+                        }`}
+                      >
+                        {sector}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Market Cap */}
+              <div>
+                <label className="block text-xs font-semibold text-off-white/40 uppercase tracking-wider mb-2.5">Market Cap</label>
+                <div className="flex flex-wrap gap-2">
+                  {MARKET_CAP_OPTIONS.map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => setDraftFilters((p) => ({ ...p, marketCap: id }))}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                        draftFilters.marketCap === id
+                          ? 'bg-gold/15 text-gold border-gold/30'
+                          : 'bg-surface-3 text-off-white/50 border-border'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* P/E Range */}
+              <div>
+                <label className="block text-xs font-semibold text-off-white/40 uppercase tracking-wider mb-2.5">P/E Range</label>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <div className="text-2xs text-off-white/30 mb-1">Min</div>
+                    <input type="number" min={0} placeholder="0" value={draftFilters.peMin}
+                      onChange={(e) => setDraftFilters((p) => ({ ...p, peMin: e.target.value }))}
+                      className="w-full px-3 py-2 bg-surface-3 border border-border rounded-lg text-sm text-off-white placeholder-off-white/20 focus:outline-none focus:border-gold/50 transition-colors" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-2xs text-off-white/30 mb-1">Max</div>
+                    <input type="number" min={0} placeholder="∞" value={draftFilters.peMax}
+                      onChange={(e) => setDraftFilters((p) => ({ ...p, peMax: e.target.value }))}
+                      className="w-full px-3 py-2 bg-surface-3 border border-border rounded-lg text-sm text-off-white placeholder-off-white/20 focus:outline-none focus:border-gold/50 transition-colors" />
+                  </div>
+                </div>
+              </div>
+              {/* Price Range */}
+              <div>
+                <label className="block text-xs font-semibold text-off-white/40 uppercase tracking-wider mb-2.5">Price Range</label>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <div className="text-2xs text-off-white/30 mb-1">Min $</div>
+                    <input type="number" min={0} placeholder="0" value={draftFilters.priceMin}
+                      onChange={(e) => setDraftFilters((p) => ({ ...p, priceMin: e.target.value }))}
+                      className="w-full px-3 py-2 bg-surface-3 border border-border rounded-lg text-sm text-off-white placeholder-off-white/20 focus:outline-none focus:border-gold/50 transition-colors" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-2xs text-off-white/30 mb-1">Max $</div>
+                    <input type="number" min={0} placeholder="∞" value={draftFilters.priceMax}
+                      onChange={(e) => setDraftFilters((p) => ({ ...p, priceMax: e.target.value }))}
+                      className="w-full px-3 py-2 bg-surface-3 border border-border rounded-lg text-sm text-off-white placeholder-off-white/20 focus:outline-none focus:border-gold/50 transition-colors" />
+                  </div>
+                </div>
+              </div>
+              {/* Min Volume */}
+              <div>
+                <label className="block text-xs font-semibold text-off-white/40 uppercase tracking-wider mb-2.5">Min Volume (M)</label>
+                <input type="number" min={0} placeholder="e.g. 10" value={draftFilters.volumeMin}
+                  onChange={(e) => setDraftFilters((p) => ({ ...p, volumeMin: e.target.value }))}
+                  className="w-full px-3 py-2 bg-surface-3 border border-border rounded-lg text-sm text-off-white placeholder-off-white/20 focus:outline-none focus:border-gold/50 transition-colors" />
+              </div>
+              {/* Actions */}
+              <div className="flex gap-3 pt-2 pb-4">
+                <button
+                  onClick={() => { applyFilters(); setShowMobileFilters(false); }}
+                  className="flex-1 py-3 bg-gold text-black font-bold text-sm rounded-lg transition-colors hover:bg-gold-light"
+                >
+                  Apply Filters
+                </button>
+                <button
+                  onClick={resetFilters}
+                  className="px-4 py-3 text-off-white/50 hover:text-off-white text-sm border border-border rounded-lg transition-colors"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="max-w-[1440px] mx-auto px-4 md:px-6 py-6 md:py-8">
 
         {/* Page Title */}
-        <div className="mb-6">
-          <h1 className="font-serif text-3xl text-off-white mb-1">Stock Screener</h1>
-          <p className="text-sm text-off-white/40">Filter and discover opportunities across the market</p>
+        <div className="mb-4 md:mb-6">
+          <h1 className="font-serif text-2xl md:text-3xl text-off-white mb-1">Stock Screener</h1>
+          <p className="text-xs md:text-sm text-off-white/40">Filter and discover opportunities across the market</p>
+        </div>
+
+        {/* Mobile: Filters button + sort chips */}
+        <div className="md:hidden mb-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowMobileFilters(true)}
+              className="tap-target flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border rounded-lg text-sm text-off-white/70 hover:border-gold/40 hover:text-off-white transition-colors"
+            >
+              <Filter size={14} className="text-gold" />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.5 bg-gold text-obsidian rounded text-xs font-bold">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <span className="text-xs text-off-white/40 ml-auto">
+              {sortedStocks.length} of {MOCK_STOCKS.length} stocks
+            </span>
+          </div>
+          {/* Sort chips — horizontal scroll */}
+          <div className="overflow-x-auto scrollbar-hidden -mx-4 px-4">
+            <div className="flex gap-2 min-w-max">
+              {([
+                { key: 'marketCap' as SortKey, label: 'Mkt Cap' },
+                { key: 'changePct' as SortKey, label: 'Change %' },
+                { key: 'price'     as SortKey, label: 'Price' },
+                { key: 'volume'    as SortKey, label: 'Volume' },
+                { key: 'pe'        as SortKey, label: 'P/E' },
+                { key: 'ticker'    as SortKey, label: 'Ticker' },
+              ]).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => handleSort(key)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${
+                    sortKey === key
+                      ? 'bg-gold/15 text-gold border-gold/30'
+                      : 'bg-surface-2 text-off-white/50 border-border'
+                  }`}
+                >
+                  {label}
+                  {sortKey === key && (
+                    <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="flex gap-6 items-start">
 
-          {/* ── Filter Sidebar ──────────────────────────────── */}
-          <aside className="w-72 flex-shrink-0 bg-surface-2 border border-border rounded-xl p-5 space-y-6 sticky top-6">
+          {/* ── Filter Sidebar — desktop only ───────────────── */}
+          <aside className="hidden md:block w-72 flex-shrink-0 bg-surface-2 border border-border rounded-xl p-5 space-y-6 sticky top-6">
 
             {/* Header */}
             <div className="flex items-center justify-between">
@@ -499,8 +688,8 @@ export default function Screener() {
           {/* ── Results Area ──────────────────────────────────── */}
           <div className="flex-1 min-w-0">
 
-            {/* Results header */}
-            <div className="flex items-center justify-between mb-4">
+            {/* Results header — desktop */}
+            <div className="hidden md:flex items-center justify-between mb-4">
               <span className="text-sm text-off-white/60">
                 Showing{' '}
                 <span className="text-off-white font-semibold">{sortedStocks.length}</span>
@@ -546,8 +735,48 @@ export default function Screener() {
               )}
             </div>
 
-            {/* Table */}
-            <div className="bg-surface border border-border rounded-xl overflow-hidden">
+            {/* ── Mobile card list ──────────────────────────── */}
+            <div className="md:hidden space-y-2">
+              {sortedStocks.length === 0 ? (
+                <div className="card p-8 text-center text-off-white/30 text-sm">
+                  No stocks match filters.{' '}
+                  <button onClick={resetFilters} className="text-gold hover:underline ml-1">Reset</button>
+                </div>
+              ) : (
+                sortedStocks.map((stock) => {
+                  const isGain = stock.changePct >= 0;
+                  return (
+                    <button
+                      key={stock.ticker}
+                      onClick={() => handleRowClick(stock.ticker)}
+                      className="w-full text-left mobile-card"
+                    >
+                      <div className="flex items-start justify-between mb-1.5">
+                        <div>
+                          <span className="font-mono font-bold text-gold text-sm">{stock.ticker}</span>
+                          <span className="text-xs text-off-white/50 ml-2">{stock.company}</span>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="font-mono text-sm text-off-white">${stock.price.toFixed(2)}</p>
+                          <p className={`font-mono text-xs font-semibold ${isGain ? 'text-gain' : 'text-loss'}`}>
+                            {isGain ? '+' : ''}{stock.changePct.toFixed(2)}%
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-surface-3 border border-border text-off-white/40">{stock.sector}</span>
+                        <span className="text-xs text-off-white/30">{fmtMarketCap(stock.marketCap)}</span>
+                        {stock.pe !== null && <span className="text-xs text-off-white/30">P/E {stock.pe.toFixed(1)}</span>}
+                        <span className="text-xs text-off-white/30">{stock.volume.toFixed(1)}M vol</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {/* ── Desktop table ─────────────────────────────── */}
+            <div className="hidden md:block bg-surface border border-border rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse">
                   <thead>
@@ -618,7 +847,7 @@ export default function Screener() {
               </div>
             </div>
 
-            <p className="text-xs text-off-white/20 mt-3 text-right">
+            <p className="text-xs text-off-white/20 mt-3 text-right hidden md:block">
               Click any row to load the ticker into the trading panel. Data is simulated.
             </p>
           </div>
