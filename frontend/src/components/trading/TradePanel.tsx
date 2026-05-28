@@ -261,8 +261,8 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
   return (
     <>
       <aside
-        className={`flex flex-col h-full bg-surface border-l border-border ${className}`}
-        style={{ width: 320 }}
+        className={`flex flex-col h-full bg-surface md:border-l border-border ${className}`}
+        style={{ width: '100%', maxWidth: 320 }}
         aria-label="Trade panel"
       >
         {/* ── Header ─────────────────────────────────────────── */}
@@ -276,10 +276,10 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
           {onClose && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-md text-[#a09a8e] hover:text-off-white hover:bg-surface-3 transition-colors"
+              className="tap-target p-1.5 rounded-md text-[#a09a8e] hover:text-off-white hover:bg-surface-3 transition-colors"
               aria-label="Close trade panel"
             >
-              <X size={16} />
+              <X size={18} />
             </button>
           )}
         </div>

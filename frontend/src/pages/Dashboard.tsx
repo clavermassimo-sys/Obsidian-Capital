@@ -111,24 +111,24 @@ interface StatCardProps {
 
 function StatCard({ label, value, sub, subColor, icon, sparkData, sparkColor = '#c9a84c', sparkId = 'spark' }: StatCardProps) {
   return (
-    <motion.div variants={item} className="card p-5 flex flex-col gap-3">
+    <motion.div variants={item} className="card p-3 md:p-5 flex flex-col gap-2 md:gap-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-off-white/40 uppercase tracking-wider">{label}</span>
-        <span className="text-off-white/25">{icon}</span>
+        <span className="text-[10px] md:text-xs font-medium text-off-white/40 uppercase tracking-wider leading-tight">{label}</span>
+        <span className="text-off-white/25 hidden sm:block">{icon}</span>
       </div>
       <div className="flex items-end justify-between">
-        <div>
-          <div className="text-2xl font-mono font-semibold tabular-nums text-off-white tracking-tight leading-none">
+        <div className="min-w-0 flex-1">
+          <div className="text-base md:text-2xl font-mono font-semibold tabular-nums text-off-white tracking-tight leading-none truncate">
             {value}
           </div>
           {sub && (
-            <div className={`text-xs font-medium mt-1.5 tabular-nums ${subColor ?? 'text-off-white/50'}`}>
+            <div className={`text-[10px] md:text-xs font-medium mt-1 md:mt-1.5 tabular-nums ${subColor ?? 'text-off-white/50'}`}>
               {sub}
             </div>
           )}
         </div>
         {sparkData && (
-          <div className="w-20 h-10 opacity-70">
+          <div className="w-12 md:w-20 h-8 md:h-10 opacity-70 flex-shrink-0 ml-1">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={sparkData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
                 <defs>
@@ -212,7 +212,7 @@ function PortfolioChart({ portfolioValue }: { portfolioValue: number }) {
   }, [portfolioValue]);
 
   return (
-    <ResponsiveContainer width="100%" height={280}>
+    <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="portfolioGrad" x1="0" y1="0" x2="0" y2="1">
@@ -298,31 +298,32 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-obsidian">
-      <div className="max-w-[1440px] mx-auto px-6 py-8">
+      <div className="max-w-[1440px] mx-auto px-4 md:px-6 py-6 md:py-8">
         <motion.div
           variants={container}
           initial="hidden"
           animate="show"
-          className="space-y-6"
+          className="space-y-4 md:space-y-6"
         >
           {/* ── Header ───────────────────────────────────────── */}
-          <motion.div variants={item} className="flex items-start justify-between flex-wrap gap-4">
+          <motion.div variants={item} className="flex items-start justify-between flex-wrap gap-3">
             <div>
-              <h1 className="font-serif text-3xl font-medium text-off-white">Portfolio Overview</h1>
-              <p className="text-sm text-off-white/40 mt-1">
+              <h1 className="font-serif text-2xl md:text-3xl font-medium text-off-white">Portfolio Overview</h1>
+              <p className="text-xs md:text-sm text-off-white/40 mt-1">
                 {greeting},{' '}
                 <span className="text-off-white/70">{user?.name?.split(' ')[0] ?? 'Investor'}</span>
-                {' '}· {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                {' '}· <span className="hidden sm:inline">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                <span className="sm:hidden">{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
               </p>
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Market status badge */}
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${statusConfig.badge}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot}`} />
                 {statusConfig.label}
               </div>
-              {/* ET clock */}
-              <div className="flex items-center gap-1.5 text-xs text-off-white/30">
+              {/* ET clock — hidden on smallest screens */}
+              <div className="hidden sm:flex items-center gap-1.5 text-xs text-off-white/30">
                 <Clock size={12} />
                 <span>
                   {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET
@@ -342,7 +343,7 @@ export default function Dashboard() {
           <UpgradePromptBanner tier={tier} monthlyVolume={portfolioValue * 0.15} />
 
           {/* ── Stats Row ────────────────────────────────────── */}
-          <motion.div variants={container} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <motion.div variants={container} className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
             <StatCard
               label="Portfolio Value"
               value={formatCurrency(portfolioValue, { compact: false })}
@@ -387,15 +388,15 @@ export default function Dashboard() {
           <CommissionTierCard tier={tier} />
 
           {/* ── Main Content: 60/40 grid ──────────────────────── */}
-          <motion.div variants={item} className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
+          <motion.div variants={item} className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4 md:gap-6">
 
             {/* Left: Portfolio Chart + Holdings */}
-            <div className="space-y-6">
+            <div className="space-y-4 md:space-y-6">
               {/* Portfolio Chart */}
-              <div className="card p-5">
-                <div className="flex items-center justify-between mb-4">
+              <div className="card p-4 md:p-5">
+                <div className="flex items-center justify-between mb-3 md:mb-4">
                   <div>
-                    <h2 className="font-serif text-lg font-medium text-off-white">Performance</h2>
+                    <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Performance</h2>
                     <p className="text-xs text-off-white/40 mt-0.5">90-day portfolio value</p>
                   </div>
                   <div className="flex items-center gap-1 text-xs text-gain font-medium">
@@ -403,14 +404,17 @@ export default function Dashboard() {
                     +{totalReturnPct.toFixed(1)}% overall
                   </div>
                 </div>
-                <PortfolioChart portfolioValue={portfolioValue} />
+                {/* Reduced chart height on mobile */}
+                <div className="h-[200px] md:h-[280px]">
+                  <PortfolioChart portfolioValue={portfolioValue} />
+                </div>
               </div>
 
               {/* Holdings Table */}
               <div className="card overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                  <h2 className="font-serif text-lg font-medium text-off-white">Holdings</h2>
-                  <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between px-4 md:px-5 py-3 md:py-4 border-b border-border">
+                  <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Holdings</h2>
+                  <div className="flex items-center gap-2 md:gap-3">
                     <button
                       onClick={() => {
                         const headers = ['Ticker', 'Company', 'Shares', 'Avg Cost', 'Current', 'Mkt Value', 'Return $', 'Return %'];
@@ -422,7 +426,7 @@ export default function Dashboard() {
                         a.href = url; a.download = 'holdings.csv'; a.click();
                         URL.revokeObjectURL(url);
                       }}
-                      className="flex items-center gap-1.5 text-xs text-[#6b6560] hover:text-off-white transition-colors"
+                      className="hidden sm:flex items-center gap-1.5 text-xs text-[#6b6560] hover:text-off-white transition-colors"
                     >
                       <Download size={12} /> Export CSV
                     </button>
@@ -438,8 +442,8 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Right: Watchlist */}
-            <div className="flex flex-col">
+            {/* Right: Watchlist — hidden on mobile (accessible via Markets tab) */}
+            <div className="hidden xl:flex flex-col">
               <Watchlist className="flex-1" />
               <div className="mt-3">
                 <Link

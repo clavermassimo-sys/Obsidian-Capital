@@ -1,7 +1,6 @@
 /* ============================================================
    Obsidian Capital — Watchlist
-   Watchlist panel with real-time mock price updates, add/remove
-   tickers, and click-to-trade integration.
+   Real-time watchlist via Socket.IO + REST API for initial prices.
    ============================================================ */
 
 import React, {
@@ -14,44 +13,20 @@ import {
   Plus,
   X,
   Search,
-  TrendingUp,
-  TrendingDown,
   Eye,
   ArrowUp,
   ArrowDown,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 import type { WatchlistItem } from '@/types';
 import { useTrading } from '@/contexts/TradingContext';
-
-// ── Mock searchable universe ──────────────────────────────────
-
-const SEARCH_UNIVERSE: WatchlistItem[] = [
-  { ticker: 'AAPL',  companyName: 'Apple Inc.',              price: 189.84, change:  2.14,  changePct:  1.14, volume: 55_000_000 },
-  { ticker: 'MSFT',  companyName: 'Microsoft Corp.',         price: 418.32, change:  5.88,  changePct:  1.43, volume: 22_000_000 },
-  { ticker: 'NVDA',  companyName: 'NVIDIA Corp.',            price: 875.40, change: 22.10,  changePct:  2.59, volume: 48_000_000 },
-  { ticker: 'AMZN',  companyName: 'Amazon.com Inc.',         price: 198.72, change: -1.44,  changePct: -0.72, volume: 34_000_000 },
-  { ticker: 'GOOGL', companyName: 'Alphabet Inc.',           price: 171.96, change:  1.08,  changePct:  0.63, volume: 24_000_000 },
-  { ticker: 'TSLA',  companyName: 'Tesla Inc.',              price: 248.42, change:  8.32,  changePct:  3.46, volume: 82_450_000 },
-  { ticker: 'META',  companyName: 'Meta Platforms',          price: 571.28, change: -4.12,  changePct: -0.72, volume: 14_300_000 },
-  { ticker: 'JPM',   companyName: 'JPMorgan Chase',          price: 224.58, change:  1.24,  changePct:  0.55, volume:  9_120_000 },
-  { ticker: 'V',     companyName: 'Visa Inc.',               price: 289.34, change: -0.88,  changePct: -0.30, volume:  6_450_000 },
-  { ticker: 'BRK.B', companyName: 'Berkshire Hathaway B',   price: 452.80, change:  2.08,  changePct:  0.46, volume:  3_850_000 },
-  { ticker: 'GLD',   companyName: 'SPDR Gold Trust ETF',    price: 238.40, change:  1.84,  changePct:  0.78, volume: 10_200_000 },
-  { ticker: 'SPY',   companyName: 'SPDR S&P 500 ETF',       price: 531.20, change:  3.44,  changePct:  0.65, volume: 71_000_000 },
-  { ticker: 'QQQ',   companyName: 'Invesco QQQ Trust',      price: 468.12, change:  6.28,  changePct:  1.36, volume: 42_000_000 },
-  { ticker: 'XOM',   companyName: 'Exxon Mobil Corp.',      price: 114.62, change:  0.98,  changePct:  0.86, volume: 18_000_000 },
-  { ticker: 'UNH',   companyName: 'UnitedHealth Group',     price: 318.50, change: -2.80,  changePct: -0.87, volume:  4_200_000 },
-  { ticker: 'WMT',   companyName: 'Walmart Inc.',           price: 93.48,  change:  0.56,  changePct:  0.60, volume: 21_000_000 },
-  { ticker: 'LLY',   companyName: 'Eli Lilly and Co.',      price: 889.20, change: 12.40,  changePct:  1.41, volume:  3_800_000 },
-  { ticker: 'COST',  companyName: 'Costco Wholesale',       price: 928.14, change: -6.22,  changePct: -0.67, volume:  2_900_000 },
-];
+import { marketApi } from '@/services/api';
 
 // ── Helpers ───────────────────────────────────────────────────
 
-function formatCurrency(v: number, compact = false): string {
-  if (compact && v >= 1000) {
-    return `$${(v / 1000).toFixed(1)}K`;
-  }
+function formatCurrency(v: number): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -66,20 +41,13 @@ function formatVolume(v: number): string {
   return v.toString();
 }
 
-// Simulate a small price tick
-function tickPrice(item: WatchlistItem): WatchlistItem {
-  const maxTick = item.price * 0.003; // up to 0.3% per tick
-  const delta = (Math.random() - 0.49) * maxTick;
-  const newPrice = Math.max(0.01, item.price + delta);
-  const newChange = item.change + delta;
-  const basePrice = newPrice - newChange;
-  const newChangePct = basePrice > 0 ? (newChange / basePrice) * 100 : 0;
-  return {
-    ...item,
-    price: parseFloat(newPrice.toFixed(2)),
-    change: parseFloat(newChange.toFixed(2)),
-    changePct: parseFloat(newChangePct.toFixed(2)),
-  };
+// ── Price state for a ticker ──────────────────────────────────
+
+interface LivePrice {
+  price: number;
+  change: number;
+  changePct: number;
+  volume: number;
 }
 
 // ── Sub-components ────────────────────────────────────────────
@@ -92,9 +60,11 @@ interface AddTickerModalProps {
 
 function AddTickerModal({ existingTickers, onAdd, onClose }: AddTickerModalProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<WatchlistItem[]>([]);
+  const [results, setResults] = useState<Array<{ symbol: string; name: string; type: string }>>([]);
+  const [searching, setSearching] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -109,23 +79,58 @@ function AddTickerModal({ existingTickers, onAdd, onClose }: AddTickerModalProps
   }, [onClose]);
 
   useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!query.trim()) {
       setResults([]);
       return;
     }
-    const q = query.toLowerCase();
-    setResults(
-      SEARCH_UNIVERSE.filter(
-        (s) =>
-          !existingTickers.includes(s.ticker) &&
-          (s.ticker.toLowerCase().includes(q) ||
-            s.companyName.toLowerCase().includes(q))
-      ).slice(0, 8)
-    );
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await marketApi.searchAssets(query.trim());
+        setResults(
+          (data.assets ?? []).filter(
+            (a) => !existingTickers.includes(a.symbol)
+          ).slice(0, 8)
+        );
+      } catch {
+        setResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
   }, [query, existingTickers]);
 
   function handleOverlayClick(e: React.MouseEvent<HTMLDivElement>) {
     if (e.target === overlayRef.current) onClose();
+  }
+
+  async function handleSelect(symbol: string, name: string) {
+    try {
+      const quote = await marketApi.getQuote(symbol);
+      const item: WatchlistItem = {
+        ticker: symbol,
+        companyName: name,
+        price: quote.price,
+        change: quote.change,
+        changePct: quote.changePct,
+        volume: quote.volume,
+        high52: quote.high52,
+        low52: quote.low52,
+      };
+      onAdd(item);
+    } catch {
+      // Fallback with minimal data if quote fails
+      onAdd({
+        ticker: symbol,
+        companyName: name,
+        price: 0,
+        change: 0,
+        changePct: 0,
+        volume: 0,
+      });
+    }
+    onClose();
   }
 
   return (
@@ -168,33 +173,31 @@ function AddTickerModal({ existingTickers, onAdd, onClose }: AddTickerModalProps
           </div>
 
           {/* Results */}
-          {results.length > 0 ? (
+          {searching ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-10 rounded-lg bg-surface-2 animate-pulse" />
+              ))}
+            </div>
+          ) : results.length > 0 ? (
             <div className="rounded-lg border border-border bg-surface-2 overflow-hidden max-h-64 overflow-y-auto">
-              {results.map((stock) => (
+              {results.map((asset) => (
                 <button
-                  key={stock.ticker}
-                  onClick={() => { onAdd(stock); onClose(); }}
+                  key={asset.symbol}
+                  onClick={() => handleSelect(asset.symbol, asset.name)}
                   className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-surface-3 transition-colors text-left border-b border-border last:border-0"
                 >
                   <div>
                     <p className="text-sm font-mono font-semibold text-off-white">
-                      {stock.ticker}
+                      {asset.symbol}
                     </p>
-                    <p className="text-xs font-sans text-[#a09a8e] truncate max-w-[160px]">
-                      {stock.companyName}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-mono text-off-white">
-                      {formatCurrency(stock.price)}
-                    </p>
-                    <p
-                      className="text-xs font-sans"
-                      style={{ color: stock.change >= 0 ? '#3d9e6e' : '#c0453a' }}
-                    >
-                      {stock.change >= 0 ? '+' : ''}{stock.changePct.toFixed(2)}%
+                    <p className="text-xs font-sans text-[#a09a8e] truncate max-w-[180px]">
+                      {asset.name}
                     </p>
                   </div>
+                  <span className="text-xs font-sans text-[#6b6560] uppercase">
+                    {asset.type}
+                  </span>
                 </button>
               ))}
             </div>
@@ -219,26 +222,89 @@ export function Watchlist({ className = '' }: WatchlistProps) {
   const { watchlist, addToWatchlist, removeFromWatchlist, setSelectedTicker } =
     useTrading();
 
-  const [liveItems, setLiveItems] = useState<WatchlistItem[]>(watchlist);
+  // Map of ticker -> live price data
+  const [livePrices, setLivePrices] = useState<Map<string, LivePrice>>(new Map());
   const [showAddModal, setShowAddModal] = useState(false);
   const [hoveredTicker, setHoveredTicker] = useState<string | null>(null);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
 
-  // Keep liveItems in sync when context watchlist changes
+  // Fetch initial prices for all watchlist tickers
   useEffect(() => {
-    setLiveItems((prev) => {
-      // Merge: if already in liveItems keep live price, otherwise use context
-      const prevMap = new Map(prev.map((i) => [i.ticker, i]));
-      return watchlist.map((item) => prevMap.get(item.ticker) ?? item);
+    if (watchlist.length === 0) return;
+
+    const tickers = watchlist.map((w) => w.ticker);
+    Promise.all(
+      tickers.map((symbol) =>
+        marketApi.getQuote(symbol).then((q) => ({ symbol, q })).catch(() => null)
+      )
+    ).then((results) => {
+      setLivePrices((prev) => {
+        const next = new Map(prev);
+        results.forEach((r) => {
+          if (r) {
+            next.set(r.symbol, {
+              price: r.q.price,
+              change: r.q.change,
+              changePct: r.q.changePct,
+              volume: r.q.volume,
+            });
+          }
+        });
+        return next;
+      });
     });
-  }, [watchlist]);
+  }, [watchlist.map((w) => w.ticker).join(',')]);
 
-  // Simulate price ticks every 3 seconds
+  // Socket.IO real-time price updates
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLiveItems((prev) => prev.map(tickPrice));
-    }, 3000);
-    return () => clearInterval(interval);
+    const socket = io('http://localhost:3001', {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 2000,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      setSocketConnected(true);
+      // Subscribe to all current watchlist tickers
+      watchlist.forEach((w) => {
+        socket.emit('subscribe:ticker', w.ticker);
+      });
+    });
+
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
+    });
+
+    socket.on('price:update', (data: { symbol: string; price: number; change: number; changePct: number }) => {
+      setLivePrices((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(data.symbol);
+        next.set(data.symbol, {
+          price: data.price,
+          change: data.change,
+          changePct: data.changePct,
+          volume: existing?.volume ?? 0,
+        });
+        return next;
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
   }, []);
+
+  // When watchlist changes, subscribe new tickers
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !socketConnected) return;
+    watchlist.forEach((w) => {
+      socket.emit('subscribe:ticker', w.ticker);
+    });
+  }, [watchlist, socketConnected]);
 
   const handleAdd = useCallback(
     (item: WatchlistItem) => {
@@ -255,7 +321,16 @@ export function Watchlist({ className = '' }: WatchlistProps) {
     [removeFromWatchlist]
   );
 
-  const existingTickers = liveItems.map((i) => i.ticker);
+  // Merge live prices with watchlist items
+  const liveItems = watchlist.map((item) => {
+    const live = livePrices.get(item.ticker);
+    if (live) {
+      return { ...item, price: live.price, change: live.change, changePct: live.changePct, volume: live.volume };
+    }
+    return item;
+  });
+
+  const existingTickers = watchlist.map((i) => i.ticker);
 
   return (
     <>
@@ -352,7 +427,7 @@ export function Watchlist({ className = '' }: WatchlistProps) {
                   {/* Price */}
                   <div className="text-right">
                     <p className="text-sm font-mono font-semibold text-off-white">
-                      {formatCurrency(item.price)}
+                      {item.price > 0 ? formatCurrency(item.price) : '—'}
                     </p>
                     <p className="text-2xs font-sans text-[#4a4540] mt-0.5">
                       Vol {formatVolume(item.volume)}
@@ -392,13 +467,22 @@ export function Watchlist({ className = '' }: WatchlistProps) {
           )}
         </div>
 
-        {/* ── Footer: live indicator ───────────────────────── */}
+        {/* ── Footer: live/reconnecting indicator ─────────── */}
         {liveItems.length > 0 && (
           <div className="px-4 py-2 border-t border-border flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#3d9e6e] animate-pulse" />
-            <span className="text-2xs font-sans text-[#4a4540]">
-              Live prices · updates every 3s
-            </span>
+            {socketConnected ? (
+              <>
+                <Wifi size={12} className="text-[#3d9e6e]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-[#3d9e6e] animate-pulse" />
+                <span className="text-2xs font-sans font-semibold text-[#3d9e6e]">LIVE</span>
+              </>
+            ) : (
+              <>
+                <WifiOff size={12} className="text-amber-400" />
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-2xs font-sans font-semibold text-amber-400">RECONNECTING</span>
+              </>
+            )}
           </div>
         )}
       </div>

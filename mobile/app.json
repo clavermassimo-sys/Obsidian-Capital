@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Obsidian Capital",
+    "slug": "obsidian-capital",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0a0a0a",
+    "splash": {
+      "backgroundColor": "#0a0a0a"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.obsidiancapital.app",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Used for secure login"
+      }
+    },
+    "android": {
+      "package": "com.obsidiancapital.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "scheme": "obsidian"
+  }
+}

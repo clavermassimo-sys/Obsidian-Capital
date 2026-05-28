@@ -1,47 +1,85 @@
 /* ============================================================
-   Obsidian Capital — Axios API Instance + Typed API helpers
-   Centralized HTTP client with JWT auth and 401 handling
+   Obsidian Capital Mobile — Axios API Client + Typed Helpers
+   JWT stored in SecureStore, attached as Bearer token.
    ============================================================ */
 
-import axios from 'axios';
+import axios, { InternalAxiosRequestConfig } from 'axios';
+import * as SecureStore from 'expo-secure-store';
+
+// ── Base URL ──────────────────────────────────────────────────
+// Update to your machine's LAN IP when testing on a real device.
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3001';
+
+export const TOKEN_KEY = 'oc_jwt_token';
+
+// ── Axios instance ────────────────────────────────────────────
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/api',
-  timeout: 10000,
+  baseURL: `${BASE_URL}/api`,
+  timeout: 12000,
   headers: { 'Content-Type': 'application/json' },
 });
 
-// ── Request Interceptor: attach JWT token ─────────────────────
+// ── Request interceptor: attach JWT ───────────────────────────
 
-api.interceptors.request.use((config) => {
-  const stored = localStorage.getItem('oc_user');
-  if (stored) {
-    try {
-      const { token } = JSON.parse(stored);
-      if (token) config.headers.Authorization = `Bearer ${token}`;
-    } catch {
-      // Malformed storage — ignore
+api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
+  try {
+    const token = await SecureStore.getItemAsync(TOKEN_KEY);
+    if (token && config.headers) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
+  } catch {
+    // SecureStore unavailable — proceed without token
   }
   return config;
 });
 
-// ── Response Interceptor: handle 401 by clearing auth ────────
+// ── Response interceptor: handle 401 ─────────────────────────
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('oc_user');
-      window.location.href = '/login';
+      await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => null);
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;
 
 // ── Types ─────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  tier: 'standard' | 'member' | 'private';
+  kycStatus: 'pending' | 'approved' | 'rejected' | 'not_started';
+  buyingPower: number;
+  portfolioValue: number;
+  createdAt: string;
+  avatarUrl?: string;
+  phone?: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  user: User;
+}
+
+export interface RegisterPayload {
+  name: string;
+  email: string;
+  password: string;
+  tier?: 'standard' | 'member' | 'private';
+  dob?: string;
+  ssnLast4?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+}
 
 export interface QuoteResponse {
   symbol: string;
@@ -56,7 +94,7 @@ export interface QuoteResponse {
 }
 
 export interface Bar {
-  t: string; // ISO timestamp
+  t: string;
   o: number;
   h: number;
   l: number;
@@ -183,9 +221,32 @@ export interface PreviewParams {
   time_in_force?: string;
 }
 
-export interface PlaceOrderParams extends PreviewParams {
-  // same shape as preview
+export interface PlaceOrderParams extends PreviewParams {}
+
+export interface PreviewResponse {
+  symbol: string;
+  side: string;
+  qty: number;
+  estimatedPrice: number;
+  subtotal: number;
+  commissionRate: number;
+  commissionAmount: number;
+  total: number;
+  tier: string;
 }
+
+// ── Auth API ──────────────────────────────────────────────────
+
+export const authApi = {
+  login: (email: string, password: string) =>
+    api.post<LoginResponse>('/auth/login', { email, password }).then((r) => r.data),
+
+  register: (payload: RegisterPayload) =>
+    api.post<LoginResponse>('/auth/register', payload).then((r) => r.data),
+
+  getMe: () =>
+    api.get<{ user: User }>('/auth/me').then((r) => r.data),
+};
 
 // ── Market API ────────────────────────────────────────────────
 
@@ -204,12 +265,10 @@ export const marketApi = {
   getMovers: () =>
     api.get<MoversResponse>('/market/movers').then((r) => r.data),
 
-  getNews: (symbols?: string, limit = 10) =>
-    api
-      .get<NewsResponse>('/market/news', { params: { symbols, limit } })
-      .then((r) => r.data),
+  getNews: (limit = 10) =>
+    api.get<NewsResponse>('/market/news', { params: { limit } }).then((r) => r.data),
 
-  searchAssets: (q: string) =>
+  search: (q: string) =>
     api.get<SearchResponse>('/market/search', { params: { q } }).then((r) => r.data),
 };
 
@@ -235,8 +294,8 @@ export const tradesApi = {
     api.get<AccountResponse>('/trades/account').then((r) => r.data),
 
   previewOrder: (params: PreviewParams) =>
-    api.post('/trades/preview', params).then((r) => r.data),
+    api.post<PreviewResponse>('/trades/preview', params).then((r) => r.data),
 
   placeOrder: (params: PlaceOrderParams) =>
-    api.post('/trades/order', params).then((r) => r.data),
+    api.post<{ order: AlpacaOrder }>('/trades/order', params).then((r) => r.data),
 };

@@ -488,3 +488,23 @@ input[type='number'] {
 .flash-loss {
   animation: flashLoss 0.8s ease-out forwards;
 }
+
+/* ============================================================
+   Mobile Responsive Utilities
+   ============================================================ */
+@layer components {
+  /* Mobile card list for tables */
+  .mobile-card {
+    @apply bg-surface-2 rounded-xl border border-border p-4 mb-2 active:bg-surface-3 transition-colors;
+  }
+
+  /* Bottom sheet / drawer */
+  .bottom-sheet {
+    @apply fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-2xl border-t border-border shadow-surface-lg;
+  }
+
+  /* Touch-friendly minimum tap target */
+  .tap-target {
+    @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  }
+}
