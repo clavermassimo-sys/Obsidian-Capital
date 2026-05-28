@@ -569,6 +569,98 @@ function AboutSection() {
   );
 }
 
+// ── Section: Leadership ───────────────────────────────────────
+
+const LEADERS = [
+  {
+    firstName: 'Massimo',
+    lastName: 'Claver-Carone',
+    role: 'CEO & Founder',
+    quote: 'Building the future of elite trading.',
+  },
+  {
+    firstName: 'Marco',
+    lastName: 'Torterelli',
+    role: 'CTO',
+    quote: 'Technology-first approach to brokerage.',
+  },
+  {
+    firstName: 'Hugh',
+    lastName: 'Snyder',
+    role: 'CFO',
+    quote: 'Sound financial architecture for growth.',
+  },
+];
+
+function PersonSilhouette() {
+  return (
+    <svg viewBox="0 0 80 80" width="72" height="72" aria-hidden="true">
+      <circle cx="40" cy="28" r="16" fill="rgba(201,168,76,0.18)" />
+      <ellipse cx="40" cy="68" rx="24" ry="16" fill="rgba(201,168,76,0.10)" />
+    </svg>
+  );
+}
+
+function LeadershipSection() {
+  return (
+    <section className="py-24 px-6 bg-surface/20">
+      <div className="max-w-5xl mx-auto">
+        {/* Section header */}
+        <div className="text-center mb-16">
+          <p className="text-xs font-bold tracking-[0.3em] text-gold uppercase mb-3 font-sans">
+            LEADERSHIP
+          </p>
+          <h2 className="font-serif text-4xl font-medium text-off-white mb-4">
+            The Team Behind Obsidian
+          </h2>
+          <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold to-transparent mx-auto" />
+        </div>
+
+        {/* Leader cards */}
+        <div className="grid md:grid-cols-3 gap-6">
+          {LEADERS.map((leader) => (
+            <div
+              key={leader.lastName}
+              className="flex flex-col items-center text-center p-6 rounded-2xl bg-surface border border-border hover:border-gold/20 transition-colors duration-300"
+            >
+              {/* Circular photo placeholder */}
+              <div
+                className="w-20 h-20 rounded-full flex items-center justify-center mb-5 flex-shrink-0 overflow-hidden"
+                style={{
+                  border: '2px solid rgba(201,168,76,0.35)',
+                  background: 'radial-gradient(ellipse at 50% 30%, rgba(201,168,76,0.08) 0%, transparent 70%)',
+                }}
+              >
+                <PersonSilhouette />
+              </div>
+
+              {/* Name */}
+              <p className="font-serif text-lg font-medium text-off-white leading-tight">
+                {leader.firstName}
+              </p>
+              <p className="font-serif text-lg font-medium text-off-white leading-tight mb-1">
+                {leader.lastName}
+              </p>
+
+              {/* Role */}
+              <p className="text-xs font-bold tracking-[0.2em] text-gold/70 uppercase font-sans mb-4">
+                {leader.role}
+              </p>
+
+              {/* Quote */}
+              <div className="border-t border-border/50 pt-4 w-full">
+                <p className="text-sm text-off-white/50 font-sans italic leading-relaxed">
+                  &ldquo;{leader.quote}&rdquo;
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // ── Section: CTA ──────────────────────────────────────────────
 
 function CTASection({ onCTA }: { onCTA: (path: string) => void }) {
@@ -624,19 +716,40 @@ function Footer() {
   return (
     <footer className="border-t border-border px-6 py-10">
       <div className="max-w-5xl mx-auto">
-        {/* Disclosures */}
+        {/* Footer nav links */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-6 pb-6 border-b border-border/50">
+          <span className="text-xs font-bold tracking-[0.25em] text-gold/60 uppercase font-sans">
+            OBSIDIAN CAPITAL
+          </span>
+          <div className="flex items-center gap-x-5 ml-auto flex-wrap gap-y-2">
+            <a href="/fees" className="text-xs text-off-white/30 hover:text-gold transition-colors font-sans">
+              Fee Schedule
+            </a>
+            <a href="/terms" className="text-xs text-off-white/30 hover:text-gold transition-colors font-sans">
+              Terms
+            </a>
+            <a href="/privacy" className="text-xs text-off-white/30 hover:text-gold transition-colors font-sans">
+              Privacy
+            </a>
+            <a href="/login" className="text-xs text-off-white/30 hover:text-gold transition-colors font-sans">
+              Sign In
+            </a>
+          </div>
+        </div>
+
+        {/* Legal text */}
         <div className="space-y-3 text-xs text-off-white/25 leading-relaxed max-w-4xl">
           <p>
-            <strong className="text-off-white/40">SIPC Protection Notice:</strong> Securities held in accounts
+            Securities trading is provided through{' '}
+            <strong className="text-off-white/35">Alpaca Securities LLC</strong>, member FINRA/SIPC.
+            Obsidian Capital is not a broker-dealer and does not hold client funds. All brokerage services,
+            including order execution and account custody, are provided exclusively by Alpaca Securities LLC.
+          </p>
+          <p>
+            <strong className="text-off-white/35">SIPC Protection Notice:</strong> Securities held in accounts
             at Obsidian Capital are protected by the Securities Investor Protection Corporation (SIPC) up to
             $500,000 (including $250,000 in cash). SIPC protection does not cover market losses or guarantee
             investment returns.
-          </p>
-          <p>
-            <strong className="text-off-white/40">Regulation Best Interest (Reg BI) Disclosure:</strong> Obsidian
-            Capital is registered with the U.S. Securities and Exchange Commission (SEC) and acts in accordance
-            with Regulation Best Interest. Our recommendations are made in your best interest, taking into
-            account your individual financial situation and investment objectives.
           </p>
           <p>
             Investing involves risk, including the possible loss of principal. Past performance is not
@@ -699,6 +812,7 @@ export default function Landing() {
         <StatsBar />
         <FeaturesSection />
         <CommissionTable />
+        <LeadershipSection />
         <AboutSection />
         <CTASection onCTA={handleCTA} />
         <Footer />

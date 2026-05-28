@@ -5,6 +5,7 @@ import AdminUsers from './pages/AdminUsers'
 import AdminTrades from './pages/AdminTrades'
 import AdminRevenue from './pages/AdminRevenue'
 import AdminCompliance from './pages/AdminCompliance'
+import AdminCommissions from './pages/AdminCommissions'
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="users" element={<AdminUsers />} />
         <Route path="trades" element={<AdminTrades />} />
         <Route path="revenue" element={<AdminRevenue />} />
+        <Route path="commissions" element={<AdminCommissions />} />
         <Route path="compliance" element={<AdminCompliance />} />
       </Route>
       <Route path="*" element={<Navigate to="/admin" replace />} />

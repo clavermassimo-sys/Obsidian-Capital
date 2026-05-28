@@ -4,6 +4,7 @@ import {
   Users,
   TrendingUp,
   DollarSign,
+  Receipt,
   Shield,
   LogOut,
   User,
@@ -14,6 +15,7 @@ const navItems = [
   { to: '/admin/users', label: 'Users', icon: Users, end: false },
   { to: '/admin/trades', label: 'Trades', icon: TrendingUp, end: false },
   { to: '/admin/revenue', label: 'Revenue', icon: DollarSign, end: false },
+  { to: '/admin/commissions', label: 'Commissions', icon: Receipt, end: false },
   { to: '/admin/compliance', label: 'Compliance', icon: Shield, end: false },
 ]
 

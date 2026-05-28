@@ -1,9 +1,12 @@
 /* ============================================================
-   Obsidian Capital — Dashboard Page
+   Obsidian Capital — Dashboard Page (Complete Rewrite)
+   Portfolio overview with Framer Motion staggered animations,
+   market status, commission tier info, and upgrade prompts.
    ============================================================ */
 
 import React, { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   TrendingUp,
   TrendingDown,
@@ -11,6 +14,7 @@ import {
   Zap,
   ArrowUpRight,
   Clock,
+  Download,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -22,83 +26,197 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useTrading } from '@/contexts/TradingContext';
 import { formatCurrency, formatPercent, formatTierName } from '@/utils/format';
+import { HoldingsTable } from '@/components/portfolio/HoldingsTable';
+import { Watchlist } from '@/components/market/Watchlist';
+import { AlpacaConnectBanner } from '@/components/ui/AlpacaConnectBanner';
 
-// ── Stub components (will be replaced when real files exist) ──
-// These match the expected API for HoldingsTable, PortfolioChart, Watchlist
-function HoldingsTable() {
-  const { holdings } = useTrading();
+// ── Market Status ─────────────────────────────────────────────
+
+type MarketStatus = 'open' | 'pre-market' | 'after-hours' | 'closed';
+
+function getMarketStatus(): MarketStatus {
+  const now = new Date();
+  const et = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    hour: 'numeric',
+    minute: 'numeric',
+    hour12: false,
+    weekday: 'short',
+  }).formatToParts(now);
+
+  const hour    = parseInt(et.find((p) => p.type === 'hour')?.value    ?? '0');
+  const minute  = parseInt(et.find((p) => p.type === 'minute')?.value  ?? '0');
+  const day     = et.find((p) => p.type === 'weekday')?.value ?? '';
+  const isWeekday = !['Sat', 'Sun'].includes(day);
+  const timeNum = hour * 100 + minute;
+
+  if (!isWeekday) return 'closed';
+  if (timeNum >= 400 && timeNum < 930)  return 'pre-market';
+  if (timeNum >= 930 && timeNum < 1600) return 'open';
+  if (timeNum >= 1600 && timeNum < 2000) return 'after-hours';
+  return 'closed';
+}
+
+const MARKET_STATUS_CONFIG: Record<MarketStatus, { label: string; dot: string; badge: string }> = {
+  'open':         { label: 'Market Open',   dot: 'bg-gain animate-pulse', badge: 'bg-gain/10 border-gain/30 text-gain' },
+  'pre-market':   { label: 'Pre-Market',    dot: 'bg-gold animate-pulse', badge: 'bg-gold/10 border-gold/30 text-gold' },
+  'after-hours':  { label: 'After Hours',   dot: 'bg-blue-400',           badge: 'bg-blue-500/10 border-blue-500/30 text-blue-400' },
+  'closed':       { label: 'Market Closed', dot: 'bg-[#6b6560]',          badge: 'bg-surface-3 border-border text-[#6b6560]' },
+};
+
+// ── Animation variants ────────────────────────────────────────
+
+const container = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { staggerChildren: 0.08 },
+  },
+};
+
+const item = {
+  hidden: { opacity: 0, y: 20 },
+  show:   { opacity: 1, y: 0, transition: { duration: 0.35, ease: 'easeOut' } },
+};
+
+// ── Sparkline data ────────────────────────────────────────────
+
+function useMiniSparkline(base: number, trend: 'up' | 'down' | 'flat', seed = 1) {
+  return useMemo(() => {
+    // Deterministic "random" using seed
+    const rng = (i: number) => {
+      const x = Math.sin(seed * 9301 + i * 49297 + 233) * 10000;
+      return x - Math.floor(x);
+    };
+    return Array.from({ length: 8 }, (_, i) => {
+      const drift = trend === 'up' ? i * base * 0.004 : trend === 'down' ? -i * base * 0.003 : 0;
+      const noise = (rng(i) - 0.5) * base * 0.012;
+      return { v: Math.max(0, base + drift + noise) };
+    });
+  }, [base, trend, seed]);
+}
+
+// ── Stat Card ─────────────────────────────────────────────────
+
+interface StatCardProps {
+  label: string;
+  value: string;
+  sub?: string;
+  subColor?: string;
+  icon: React.ReactNode;
+  sparkData?: { v: number }[];
+  sparkColor?: string;
+  sparkId?: string;
+}
+
+function StatCard({ label, value, sub, subColor, icon, sparkData, sparkColor = '#c9a84c', sparkId = 'spark' }: StatCardProps) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border">
-            {['Ticker', 'Company', 'Shares', 'Avg Cost', 'Current', 'Mkt Value', 'Return $', 'Return %', 'Weight'].map((h) => (
-              <th key={h} className="text-left py-3 px-4 text-xs font-medium text-off-white/40 uppercase tracking-wider last:text-right">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {holdings.map((h, i) => (
-            <tr
-              key={h.ticker}
-              className={`border-b border-border/50 table-row-hover ${i % 2 === 0 ? 'bg-surface-2/30' : 'bg-surface-3/20'}`}
-            >
-              <td className="py-3 px-4 font-mono font-semibold text-gold">{h.ticker}</td>
-              <td className="py-3 px-4 text-off-white/80">{h.companyName}</td>
-              <td className="py-3 px-4 tabular-nums">{h.shares}</td>
-              <td className="py-3 px-4 tabular-nums">{formatCurrency(h.avgCost)}</td>
-              <td className="py-3 px-4 tabular-nums">{formatCurrency(h.currentPrice)}</td>
-              <td className="py-3 px-4 tabular-nums font-medium">{formatCurrency(h.marketValue)}</td>
-              <td className={`py-3 px-4 tabular-nums font-medium ${h.returnDollar >= 0 ? 'text-gain' : 'text-loss'}`}>
-                {h.returnDollar >= 0 ? '+' : ''}{formatCurrency(h.returnDollar)}
-              </td>
-              <td className={`py-3 px-4 tabular-nums font-medium ${h.returnPct >= 0 ? 'text-gain' : 'text-loss'}`}>
-                {formatPercent(h.returnPct)}
-              </td>
-              <td className="py-3 px-4 text-right">
-                <div className="flex items-center justify-end gap-2">
-                  <div className="h-1.5 rounded-full bg-surface-3 w-16 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gold/60"
-                      style={{ width: `${Math.min(h.portfolioWeight ?? 0, 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-off-white/60 tabular-nums text-xs w-10 text-right">
-                    {(h.portfolioWeight ?? 0).toFixed(1)}%
-                  </span>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <motion.div variants={item} className="card p-5 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-off-white/40 uppercase tracking-wider">{label}</span>
+        <span className="text-off-white/25">{icon}</span>
+      </div>
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="text-2xl font-mono font-semibold tabular-nums text-off-white tracking-tight leading-none">
+            {value}
+          </div>
+          {sub && (
+            <div className={`text-xs font-medium mt-1.5 tabular-nums ${subColor ?? 'text-off-white/50'}`}>
+              {sub}
+            </div>
+          )}
+        </div>
+        {sparkData && (
+          <div className="w-20 h-10 opacity-70">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={sparkData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id={`spark-${sparkId}`} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={sparkColor} stopOpacity={0.35} />
+                    <stop offset="100%" stopColor={sparkColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Area
+                  type="monotone"
+                  dataKey="v"
+                  stroke={sparkColor}
+                  strokeWidth={1.5}
+                  fill={`url(#spark-${sparkId})`}
+                  dot={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+    </motion.div>
   );
 }
 
-function PortfolioChart() {
+// ── Commission Tier Card ───────────────────────────────────────
+
+function CommissionTierCard({ tier }: { tier: string }) {
+  const tierRate = tier === 'private' ? '5–6%' : tier === 'member' ? '7–9%' : '10–12%';
+  const nextTier = tier === 'standard' ? 'Member' : tier === 'member' ? 'Private Client' : null;
+  const savings   = tier === 'standard' ? '2–3%' : tier === 'member' ? '2%' : null;
+
+  return (
+    <motion.div variants={item} className="card-2 p-4 flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-center gap-4">
+        <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+          tier === 'private' ? 'bg-gold/20 text-gold-light border-gold/40'
+          : tier === 'member' ? 'bg-gold/10 text-gold border-gold/20'
+          : 'bg-surface-3 text-off-white/60 border-border'
+        }`}>
+          {formatTierName(tier)}
+        </div>
+        <div className="text-xs text-off-white/50">
+          Commission rate: <span className="text-off-white font-medium">{tierRate}</span>
+        </div>
+        {tier === 'private' && (
+          <span className="flex items-center gap-1 text-xs text-gain">
+            <TrendingDown size={12} className="text-gain" />
+            Lowest available rate
+          </span>
+        )}
+      </div>
+      {nextTier && savings && (
+        <Link
+          to="/account"
+          className="flex items-center gap-1.5 text-xs text-gold hover:text-[#e0c070] transition-colors"
+        >
+          Upgrade to {nextTier} · save {savings} on commissions <ArrowUpRight size={12} />
+        </Link>
+      )}
+    </motion.div>
+  );
+}
+
+// ── Portfolio Performance Chart ───────────────────────────────
+
+function PortfolioChart({ portfolioValue }: { portfolioValue: number }) {
   const data = useMemo(() => {
-    const base = 1_200_000;
+    const base = portfolioValue * 0.65;
     return Array.from({ length: 90 }, (_, i) => {
       const date = new Date('2026-02-25');
       date.setDate(date.getDate() + i);
-      const noise = (Math.random() - 0.42) * 30000;
-      const trend = i * 7200;
+      // Deterministic noise
+      const noise = Math.sin(i * 2.1 + 0.7) * portfolioValue * 0.018 + Math.cos(i * 0.8) * portfolioValue * 0.01;
+      const trend = i * (portfolioValue - base) / 90;
       return {
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
         value: Math.max(base + trend + noise, base * 0.9),
       };
     });
-  }, []);
+  }, [portfolioValue]);
 
   return (
     <ResponsiveContainer width="100%" height={280}>
       <AreaChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="portfolioGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#c9a84c" stopOpacity={0.2} />
+            <stop offset="0%" stopColor="#c9a84c" stopOpacity={0.22} />
             <stop offset="100%" stopColor="#c9a84c" stopOpacity={0} />
           </linearGradient>
         </defs>
@@ -122,316 +240,219 @@ function PortfolioChart() {
   );
 }
 
-function Watchlist() {
-  const { watchlist, setSelectedTicker } = useTrading();
-  return (
-    <div className="divide-y divide-border/50">
-      {watchlist.map((item) => {
-        const isUp = item.changePct >= 0;
-        return (
-          <button
-            key={item.ticker}
-            onClick={() => setSelectedTicker(item.ticker)}
-            className="w-full flex items-center justify-between px-4 py-3 hover:bg-surface-3/60 transition-colors duration-150 text-left"
-          >
-            <div>
-              <div className="font-mono font-semibold text-gold text-sm">{item.ticker}</div>
-              <div className="text-xs text-off-white/50 mt-0.5 truncate max-w-[140px]">{item.companyName}</div>
-            </div>
-            <div className="text-right">
-              <div className="font-mono tabular-nums text-sm text-off-white">{formatCurrency(item.price)}</div>
-              <div className={`text-xs tabular-nums font-medium ${isUp ? 'text-gain' : 'text-loss'}`}>
-                {isUp ? '+' : ''}{item.changePct.toFixed(2)}%
-              </div>
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+// ── Upgrade Prompt ────────────────────────────────────────────
 
-// ── Helpers ───────────────────────────────────────────────────
-
-function isNYSEOpen(): boolean {
-  const now = new Date();
-  const day = now.getUTCDay();
-  if (day === 0 || day === 6) return false;
-  // ET offset: UTC-5 (EST) or UTC-4 (EDT). Approximate with UTC-4 for simplicity.
-  const etHour = ((now.getUTCHours() - 4 + 24) % 24) + now.getUTCMinutes() / 60;
-  return etHour >= 9.5 && etHour < 16;
-}
-
-// Mini sparkline data (last 7 days)
-function useMiniSparkline(base: number, trend: 'up' | 'down' | 'flat') {
-  return useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) => {
-      const drift = trend === 'up' ? i * base * 0.003 : trend === 'down' ? -i * base * 0.002 : 0;
-      const noise = (Math.random() - 0.5) * base * 0.015;
-      return { v: base + drift + noise };
-    });
-  }, [base, trend]);
-}
-
-// ── Stat Card ─────────────────────────────────────────────────
-
-interface StatCardProps {
-  label: string;
-  value: string;
-  sub?: string;
-  subColor?: string;
-  icon: React.ReactNode;
-  sparkData?: { v: number }[];
-  sparkColor?: string;
-}
-
-function StatCard({ label, value, sub, subColor, icon, sparkData, sparkColor = '#c9a84c' }: StatCardProps) {
-  return (
-    <div className="card p-5 flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-off-white/40 uppercase tracking-wider">{label}</span>
-        <span className="text-off-white/25">{icon}</span>
-      </div>
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="text-2xl font-mono font-semibold tabular-nums text-off-white tracking-tight">
-            {value}
-          </div>
-          {sub && (
-            <div className={`text-xs font-medium mt-1 tabular-nums ${subColor ?? 'text-off-white/50'}`}>
-              {sub}
-            </div>
-          )}
-        </div>
-        {sparkData && (
-          <div className="w-20 h-10 opacity-70">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={sparkData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id={`spark-${sparkColor}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={sparkColor} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={sparkColor} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Area
-                  type="monotone"
-                  dataKey="v"
-                  stroke={sparkColor}
-                  strokeWidth={1.5}
-                  fill={`url(#spark-${sparkColor})`}
-                  dot={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Tier Banner ───────────────────────────────────────────────
-
-function TierBanner({ tier }: { tier: string }) {
+function UpgradePromptBanner({ tier, monthlyVolume }: { tier: string; monthlyVolume: number }) {
   if (tier === 'private') return null;
+  const currentRate  = tier === 'standard' ? 0.11 : 0.08;
+  const upgradeRate  = tier === 'standard' ? 0.08 : 0.055;
+  const savings      = (currentRate - upgradeRate) * monthlyVolume;
+  const upgradeName  = tier === 'standard' ? 'Member' : 'Private Client';
+
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-gold/5 border border-gold/20">
-      <Zap size={14} className="text-gold shrink-0" />
-      <span className="text-xs text-off-white/70">
-        You're on the <span className="text-gold font-medium">{formatTierName(tier)}</span> plan.{' '}
-        <Link to="/account" className="text-gold hover:text-gold-light underline underline-offset-2 transition-colors">
-          Upgrade to save on commissions
-        </Link>
+    <motion.div variants={item} className="flex items-center gap-3 px-4 py-3 rounded-lg bg-gold/5 border border-gold/20">
+      <Zap size={15} className="text-gold shrink-0" />
+      <span className="text-xs text-off-white/70 flex-1">
+        After 10 trades, you could save{' '}
+        <span className="text-gold font-semibold">{formatCurrency(savings)}/month</span>{' '}
+        by upgrading to <span className="text-gold font-medium">{upgradeName}</span>.
       </span>
-    </div>
+      <Link
+        to="/account"
+        className="flex items-center gap-1 text-xs text-gold font-semibold hover:text-[#e0c070] transition-colors whitespace-nowrap"
+      >
+        Upgrade <ArrowUpRight size={12} />
+      </Link>
+    </motion.div>
   );
 }
 
 // ── Dashboard ─────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, alpacaConnected } = useAuth();
   const { holdings } = useTrading();
 
-  const open = isNYSEOpen();
+  const marketStatus = getMarketStatus();
+  const statusConfig = MARKET_STATUS_CONFIG[marketStatus];
 
   const portfolioValue = user?.portfolioValue ?? 1_843_200;
-  const buyingPower = user?.buyingPower ?? 250_000;
-  const todayPnL = 14_823.42;
-  const todayPnLPct = 0.81;
-  const totalReturn = 643_200;
+  const buyingPower    = user?.buyingPower ?? 250_000;
+  const todayPnL       = 14_823.42;
+  const todayPnLPct    = 0.81;
+  const totalReturn    = 643_200;
   const totalReturnPct = 53.6;
+  const tier           = user?.tier ?? 'standard';
 
-  const portfolioSpark = useMiniSparkline(portfolioValue, 'up');
-  const buySpark = useMiniSparkline(buyingPower, 'flat');
-  const tier = user?.tier ?? 'standard';
+  const portfolioSpark = useMiniSparkline(portfolioValue, 'up', 1);
+  const pnlSpark       = useMiniSparkline(todayPnL, 'up', 2);
+  const returnSpark    = useMiniSparkline(totalReturn, 'up', 3);
+  const buySpark       = useMiniSparkline(buyingPower, 'flat', 4);
+
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  }, []);
 
   return (
     <div className="min-h-screen bg-obsidian">
-      <div className="max-w-[1440px] mx-auto px-6 py-8 space-y-6">
-
-        {/* ── Header ─────────────────────────────────────────── */}
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="font-serif text-3xl font-medium text-off-white">
-              Portfolio Overview
-            </h1>
-            <p className="text-sm text-off-white/40 mt-1">
-              Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'},{' '}
-              <span className="text-off-white/70">{user?.name?.split(' ')[0] ?? 'Investor'}</span>
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <TierBanner tier={tier} />
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${
-              open
-                ? 'bg-gain/10 border-gain/30 text-gain'
-                : 'bg-loss/10 border-loss/30 text-loss'
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${open ? 'bg-gain animate-pulse' : 'bg-loss'}`} />
-              NYSE {open ? 'OPEN' : 'CLOSED'}
+      <div className="max-w-[1440px] mx-auto px-6 py-8">
+        <motion.div
+          variants={container}
+          initial="hidden"
+          animate="show"
+          className="space-y-6"
+        >
+          {/* ── Header ───────────────────────────────────────── */}
+          <motion.div variants={item} className="flex items-start justify-between flex-wrap gap-4">
+            <div>
+              <h1 className="font-serif text-3xl font-medium text-off-white">Portfolio Overview</h1>
+              <p className="text-sm text-off-white/40 mt-1">
+                {greeting},{' '}
+                <span className="text-off-white/70">{user?.name?.split(' ')[0] ?? 'Investor'}</span>
+                {' '}· {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+              </p>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-off-white/30">
-              <Clock size={12} />
-              <span>
-                {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Stat Cards ─────────────────────────────────────── */}
-        <div className="grid grid-cols-4 gap-4">
-          <StatCard
-            label="Portfolio Value"
-            value={formatCurrency(portfolioValue, { compact: false })}
-            sub="Total market value"
-            icon={<DollarSign size={16} />}
-            sparkData={portfolioSpark}
-            sparkColor="#c9a84c"
-          />
-          <StatCard
-            label="Today's P&L"
-            value={`+${formatCurrency(todayPnL)}`}
-            sub={`+${todayPnLPct.toFixed(2)}% today`}
-            subColor="text-gain"
-            icon={<TrendingUp size={16} />}
-            sparkData={useMiniSparkline(todayPnL, 'up')}
-            sparkColor="#3d9e6e"
-          />
-          <StatCard
-            label="Total Return"
-            value={`+${formatCurrency(totalReturn)}`}
-            sub={`+${totalReturnPct.toFixed(1)}% since inception`}
-            subColor="text-gain"
-            icon={<ArrowUpRight size={16} />}
-            sparkData={useMiniSparkline(totalReturn, 'up')}
-            sparkColor="#3d9e6e"
-          />
-          <StatCard
-            label="Buying Power"
-            value={formatCurrency(buyingPower)}
-            sub="Available cash"
-            icon={<DollarSign size={16} />}
-            sparkData={buySpark}
-            sparkColor="#a09a8e"
-          />
-        </div>
-
-        {/* ── Main Content ────────────────────────────────────── */}
-        <div className="grid grid-cols-[1fr_300px] gap-6">
-          {/* Left column */}
-          <div className="space-y-6">
-            {/* Portfolio Chart */}
-            <div className="card p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="font-serif text-lg font-medium text-off-white">Performance</h2>
-                  <p className="text-xs text-off-white/40 mt-0.5">90-day portfolio value</p>
-                </div>
-                <div className="flex items-center gap-1 text-xs text-gain font-medium">
-                  <TrendingUp size={12} />
-                  +{totalReturnPct.toFixed(1)}% overall
-                </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Market status badge */}
+              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium ${statusConfig.badge}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${statusConfig.dot}`} />
+                {statusConfig.label}
               </div>
-              <PortfolioChart />
+              {/* ET clock */}
+              <div className="flex items-center gap-1.5 text-xs text-off-white/30">
+                <Clock size={12} />
+                <span>
+                  {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET
+                </span>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* ── Alpaca Connect Banner ─────────────────────────── */}
+          {!alpacaConnected && (
+            <motion.div variants={item}>
+              <AlpacaConnectBanner />
+            </motion.div>
+          )}
+
+          {/* ── Upgrade prompt ────────────────────────────────── */}
+          <UpgradePromptBanner tier={tier} monthlyVolume={portfolioValue * 0.15} />
+
+          {/* ── Stats Row ────────────────────────────────────── */}
+          <motion.div variants={container} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <StatCard
+              label="Portfolio Value"
+              value={formatCurrency(portfolioValue, { compact: false })}
+              sub="Total market value"
+              icon={<DollarSign size={16} />}
+              sparkData={portfolioSpark}
+              sparkColor="#c9a84c"
+              sparkId="portfolio"
+            />
+            <StatCard
+              label="Today's P&L"
+              value={`+${formatCurrency(todayPnL)}`}
+              sub={`+${todayPnLPct.toFixed(2)}% today`}
+              subColor="text-gain"
+              icon={<TrendingUp size={16} />}
+              sparkData={pnlSpark}
+              sparkColor="#3d9e6e"
+              sparkId="pnl"
+            />
+            <StatCard
+              label="Total Return"
+              value={`+${formatCurrency(totalReturn)}`}
+              sub={`+${totalReturnPct.toFixed(1)}% since inception`}
+              subColor="text-gain"
+              icon={<ArrowUpRight size={16} />}
+              sparkData={returnSpark}
+              sparkColor="#3d9e6e"
+              sparkId="return"
+            />
+            <StatCard
+              label="Buying Power"
+              value={formatCurrency(buyingPower)}
+              sub="Available cash"
+              icon={<DollarSign size={16} />}
+              sparkData={buySpark}
+              sparkColor="#a09a8e"
+              sparkId="buying"
+            />
+          </motion.div>
+
+          {/* ── Commission Tier Card ──────────────────────────── */}
+          <CommissionTierCard tier={tier} />
+
+          {/* ── Main Content: 60/40 grid ──────────────────────── */}
+          <motion.div variants={item} className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-6">
+
+            {/* Left: Portfolio Chart + Holdings */}
+            <div className="space-y-6">
+              {/* Portfolio Chart */}
+              <div className="card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="font-serif text-lg font-medium text-off-white">Performance</h2>
+                    <p className="text-xs text-off-white/40 mt-0.5">90-day portfolio value</p>
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-gain font-medium">
+                    <TrendingUp size={12} />
+                    +{totalReturnPct.toFixed(1)}% overall
+                  </div>
+                </div>
+                <PortfolioChart portfolioValue={portfolioValue} />
+              </div>
+
+              {/* Holdings Table */}
+              <div className="card overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                  <h2 className="font-serif text-lg font-medium text-off-white">Holdings</h2>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => {
+                        const headers = ['Ticker', 'Company', 'Shares', 'Avg Cost', 'Current', 'Mkt Value', 'Return $', 'Return %'];
+                        const rows = holdings.map((h) => [h.ticker, h.companyName, h.shares, h.avgCost.toFixed(2), h.currentPrice.toFixed(2), h.marketValue.toFixed(2), h.returnDollar.toFixed(2), h.returnPct.toFixed(2)]);
+                        const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+                        const blob = new Blob([csv], { type: 'text/csv' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = 'holdings.csv'; a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="flex items-center gap-1.5 text-xs text-[#6b6560] hover:text-off-white transition-colors"
+                    >
+                      <Download size={12} /> Export CSV
+                    </button>
+                    <Link
+                      to="/portfolio"
+                      className="text-xs text-gold hover:text-[#e0c070] transition-colors flex items-center gap-1"
+                    >
+                      View all <ArrowUpRight size={12} />
+                    </Link>
+                  </div>
+                </div>
+                <HoldingsTable />
+              </div>
             </div>
 
-            {/* Holdings Table */}
-            <div className="card overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                <h2 className="font-serif text-lg font-medium text-off-white">Holdings</h2>
+            {/* Right: Watchlist */}
+            <div className="flex flex-col">
+              <Watchlist className="flex-1" />
+              <div className="mt-3">
                 <Link
-                  to="/portfolio"
-                  className="text-xs text-gold hover:text-gold-light transition-colors flex items-center gap-1"
+                  to="/trade"
+                  className="flex items-center justify-center gap-2 w-full h-10 rounded-lg bg-gold text-obsidian text-sm font-bold hover:brightness-110 transition-all"
                 >
-                  View all <ArrowUpRight size={12} />
+                  <Zap size={14} />
+                  Open Trade Panel
                 </Link>
               </div>
-              <HoldingsTable />
             </div>
-          </div>
-
-          {/* Right column — Watchlist */}
-          <div className="card overflow-hidden flex flex-col">
-            <div className="px-4 py-4 border-b border-border flex items-center justify-between shrink-0">
-              <h2 className="font-serif text-base font-medium text-off-white">Watchlist</h2>
-              <Link
-                to="/markets"
-                className="text-xs text-gold hover:text-gold-light transition-colors"
-              >
-                Markets
-              </Link>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <Watchlist />
-            </div>
-            <div className="px-4 py-3 border-t border-border bg-surface-2/50 shrink-0">
-              <Link
-                to="/trade"
-                className="btn-gold w-full text-center text-xs py-2 rounded-lg font-medium"
-              >
-                Open Trade Panel
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Tier Info ─────────────────────────────────────── */}
-        <div className="card-2 p-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-              tier === 'private'
-                ? 'bg-gold/20 text-gold-light border-gold/40'
-                : tier === 'member'
-                ? 'bg-gold/10 text-gold border-gold/20'
-                : 'bg-surface-3 text-off-white/60 border-border'
-            }`}>
-              {formatTierName(tier)}
-            </div>
-            <div className="text-xs text-off-white/50">
-              Commission rate:{' '}
-              <span className="text-off-white font-medium">
-                {tier === 'private' ? '5–6%' : tier === 'member' ? '7–9%' : '10–12%'}
-              </span>
-            </div>
-          </div>
-          {tier !== 'private' && (
-            <Link
-              to="/account"
-              className="text-xs text-gold hover:text-gold-light transition-colors flex items-center gap-1"
-            >
-              Upgrade to save on commissions <ArrowUpRight size={12} />
-            </Link>
-          )}
-          {tier === 'private' && (
-            <span className="text-xs text-off-white/30 flex items-center gap-1">
-              <TrendingDown size={12} className="text-gain" />
-              Lowest available commission rate
-            </span>
-          )}
-        </div>
-
+          </motion.div>
+        </motion.div>
       </div>
     </div>
   );
