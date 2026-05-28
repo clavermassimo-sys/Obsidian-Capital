@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query } from '../config/database';
 import { generateToken, authenticate } from '../middleware/auth';
 import { authLimiter, sensitiveActionLimiter } from '../middleware/rateLimit';
+import { identityService } from '../services/identity';
 
 const router = Router();
 
@@ -109,7 +110,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response): Promi
 
     const userId = uuidv4();
 
-    // Insert new user
+    // Insert new user with kyc_status = 'pending' (requires Stripe Identity verification)
     await query(
       `INSERT INTO users (
         id, email, password_hash, name, tier, kyc_status,
@@ -131,7 +132,30 @@ router.post('/register', authLimiter, async (req: Request, res: Response): Promi
       ]
     );
 
-    // Generate token
+    // Create Stripe Identity verification session for KYC
+    let verificationClientSecret: string | null = null;
+    let verificationSessionId: string | null = null;
+    let verificationUrl: string | null = null;
+
+    try {
+      const verificationSession = await identityService.createVerificationSession(userId, email);
+      verificationClientSecret = verificationSession.clientSecret;
+      verificationSessionId = verificationSession.id;
+      verificationUrl = verificationSession.url;
+
+      // Record the KYC session in our DB
+      await query(
+        `INSERT INTO kyc_sessions (id, user_id, stripe_verification_session_id, status, created_at)
+         VALUES ($1, $2, $3, 'pending', NOW())`,
+        [uuidv4(), userId, verificationSessionId]
+      );
+    } catch (kycErr) {
+      // Non-blocking: KYC session creation failure should not prevent account creation.
+      // The user can retry via POST /auth/kyc/session.
+      console.error('[Auth] Stripe Identity session creation failed:', (kycErr as Error).message);
+    }
+
+    // Generate JWT
     const token = generateToken({
       userId,
       email,
@@ -141,7 +165,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response): Promi
 
     res.status(201).json({
       success: true,
-      message: 'Account created successfully. KYC review is pending.',
+      message: 'Account created successfully. Please complete identity verification to activate trading.',
       data: {
         user: {
           id: userId,
@@ -152,6 +176,12 @@ router.post('/register', authLimiter, async (req: Request, res: Response): Promi
           buying_power: 0,
         },
         token,
+        kyc: {
+          session_id: verificationSessionId,
+          client_secret: verificationClientSecret,
+          verification_url: verificationUrl,
+          required: true,
+        },
       },
     });
   } catch (err) {
@@ -205,7 +235,6 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
 
     const passwordMatch = await bcrypt.compare(password, user.password_hash);
     if (!passwordMatch) {
-      // Log failed attempt
       await query(
         'UPDATE users SET failed_login_attempts = COALESCE(failed_login_attempts, 0) + 1, last_failed_login = NOW() WHERE id = $1',
         [user.id]
@@ -271,7 +300,6 @@ router.post('/login', authLimiter, async (req: Request, res: Response): Promise<
 
 router.post('/logout', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
-    // Invalidate any 2FA session tokens
     if (req.user) {
       await query(
         'UPDATE users SET two_fa_session_token = NULL, two_fa_session_expires = NULL WHERE id = $1',
@@ -295,7 +323,8 @@ router.get('/me', authenticate, async (req: Request, res: Response): Promise<voi
   try {
     const result = await query(
       `SELECT id, name, email, tier, kyc_status, buying_power, role,
-              address, created_at, last_login, two_fa_enabled
+              address, created_at, last_login, two_fa_enabled,
+              ibkr_connected, ibkr_account_id
        FROM users WHERE id = $1`,
       [req.user!.userId]
     );
@@ -318,6 +347,18 @@ router.get('/me', authenticate, async (req: Request, res: Response): Promise<voi
 
     const portfolio = portfolioResult.rows[0];
 
+    // Get latest KYC session status
+    const kycResult = await query(
+      `SELECT stripe_verification_session_id, status
+       FROM kyc_sessions
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [user.id]
+    );
+
+    const latestKyc = kycResult.rows[0] || null;
+
     res.json({
       success: true,
       data: {
@@ -333,8 +374,16 @@ router.get('/me', authenticate, async (req: Request, res: Response): Promise<voi
           created_at: user.created_at,
           last_login: user.last_login,
           two_fa_enabled: user.two_fa_enabled || false,
+          ibkr_connected: user.ibkr_connected || false,
+          ibkr_account_id: user.ibkr_account_id || null,
           positions: parseInt(portfolio.positions || '0'),
           portfolio_cost_basis: parseFloat(portfolio.portfolio_cost_basis || '0'),
+          kyc_session: latestKyc
+            ? {
+                session_id: latestKyc.stripe_verification_session_id,
+                status: latestKyc.status,
+              }
+            : null,
         },
       },
     });
@@ -377,8 +426,6 @@ router.post('/verify-2fa', sensitiveActionLimiter, async (req: Request, res: Res
 
     const user = result.rows[0];
 
-    // In production, use TOTP (Time-based One-Time Password) via speakeasy or otplib
-    // For now, validate against stored code
     if (user.two_fa_code !== code) {
       res.status(401).json({
         success: false,
@@ -387,7 +434,6 @@ router.post('/verify-2fa', sensitiveActionLimiter, async (req: Request, res: Res
       return;
     }
 
-    // Clear 2FA session
     await query(
       'UPDATE users SET two_fa_session_token = NULL, two_fa_session_expires = NULL, last_login = NOW() WHERE id = $1',
       [user.id]
@@ -417,6 +463,185 @@ router.post('/verify-2fa', sensitiveActionLimiter, async (req: Request, res: Res
   } catch (err) {
     console.error('[Auth] 2FA verify error:', err);
     res.status(500).json({ success: false, error: '2FA verification failed.' });
+  }
+});
+
+// ─── POST /auth/kyc/verify ────────────────────────────────────────────────────
+// Polling endpoint: check Stripe Identity session and update kyc_status if verified.
+// Also used by the Stripe Identity webhook handler to push status updates.
+
+router.post('/kyc/verify', authenticate, sensitiveActionLimiter, async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.userId;
+  const { session_id } = req.body;
+
+  if (!session_id || typeof session_id !== 'string') {
+    res.status(400).json({ success: false, error: '"session_id" is required.' });
+    return;
+  }
+
+  try {
+    const session = await identityService.getVerificationSession(session_id);
+
+    // Verify this session belongs to the authenticated user
+    const kycRow = await query(
+      `SELECT id FROM kyc_sessions WHERE stripe_verification_session_id = $1 AND user_id = $2`,
+      [session_id, userId]
+    );
+
+    if (kycRow.rows.length === 0) {
+      res.status(403).json({ success: false, error: 'Verification session not found for this user.' });
+      return;
+    }
+
+    let kycStatus: string;
+    switch (session.status) {
+      case 'verified':
+        kycStatus = 'approved';
+        break;
+      case 'canceled':
+        kycStatus = 'rejected';
+        break;
+      case 'processing':
+        kycStatus = 'under_review';
+        break;
+      default:
+        kycStatus = 'pending';
+    }
+
+    // Update kyc_sessions record
+    await query(
+      `UPDATE kyc_sessions
+       SET status = $1, verified_at = $2
+       WHERE stripe_verification_session_id = $3`,
+      [
+        session.status,
+        session.status === 'verified' ? new Date() : null,
+        session_id,
+      ]
+    );
+
+    // Update users.kyc_status
+    await query(
+      `UPDATE users SET kyc_status = $1 WHERE id = $2`,
+      [kycStatus, userId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        kyc_status: kycStatus,
+        verification_status: session.status,
+        last_error: session.lastError ?? null,
+      },
+    });
+  } catch (err) {
+    console.error('[Auth] KYC verify error:', err);
+    res.status(500).json({ success: false, error: 'Failed to check verification status.' });
+  }
+});
+
+// ─── POST /auth/kyc/session ───────────────────────────────────────────────────
+// Create (or re-create) a Stripe Identity verification session for the authenticated user.
+
+router.post('/kyc/session', authenticate, sensitiveActionLimiter, async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.userId;
+
+  try {
+    const userResult = await query(
+      `SELECT name, email, kyc_status FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      res.status(404).json({ success: false, error: 'User not found.' });
+      return;
+    }
+
+    const { email, kyc_status } = userResult.rows[0];
+
+    if (kyc_status === 'approved') {
+      res.status(409).json({
+        success: false,
+        error: 'Identity already verified.',
+        code: 'ALREADY_VERIFIED',
+      });
+      return;
+    }
+
+    const verificationSession = await identityService.createVerificationSession(userId, email as string);
+
+    // Upsert into kyc_sessions
+    await query(
+      `INSERT INTO kyc_sessions (id, user_id, stripe_verification_session_id, status, created_at)
+       VALUES ($1, $2, $3, 'pending', NOW())
+       ON CONFLICT (stripe_verification_session_id) DO NOTHING`,
+      [uuidv4(), userId, verificationSession.id]
+    );
+
+    // Reset kyc_status to pending if it was previously rejected
+    if (kyc_status === 'rejected') {
+      await query(`UPDATE users SET kyc_status = 'pending' WHERE id = $1`, [userId]);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        session_id: verificationSession.id,
+        client_secret: verificationSession.clientSecret,
+        verification_url: verificationSession.url,
+      },
+    });
+  } catch (err) {
+    console.error('[Auth] KYC session error:', err);
+    res.status(500).json({ success: false, error: 'Failed to create verification session.' });
+  }
+});
+
+// ─── GET /auth/kyc/status ─────────────────────────────────────────────────────
+// Get current KYC status for the authenticated user.
+
+router.get('/kyc/status', authenticate, async (req: Request, res: Response): Promise<void> => {
+  const userId = req.user!.userId;
+
+  try {
+    const [userResult, sessionResult] = await Promise.all([
+      query(`SELECT kyc_status FROM users WHERE id = $1`, [userId]),
+      query(
+        `SELECT stripe_verification_session_id, status, created_at, verified_at
+         FROM kyc_sessions
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [userId]
+      ),
+    ]);
+
+    if (userResult.rows.length === 0) {
+      res.status(404).json({ success: false, error: 'User not found.' });
+      return;
+    }
+
+    const { kyc_status } = userResult.rows[0];
+    const latestSession = sessionResult.rows[0] || null;
+
+    res.json({
+      success: true,
+      data: {
+        kyc_status,
+        latest_session: latestSession
+          ? {
+              session_id: latestSession.stripe_verification_session_id,
+              status: latestSession.status,
+              created_at: latestSession.created_at,
+              verified_at: latestSession.verified_at,
+            }
+          : null,
+        can_trade: kyc_status === 'approved',
+      },
+    });
+  } catch (err) {
+    console.error('[Auth] KYC status error:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch KYC status.' });
   }
 });
 

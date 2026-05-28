@@ -353,7 +353,7 @@ function UpgradePromptBanner({ tier, monthlyVolume }: { tier: string; monthlyVol
 // ── Dashboard ─────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { user, alpacaConnected } = useAuth();
+  const { user, ibkrConnected } = useAuth();
   const { holdings } = useTrading();
 
   const marketStatus = getMarketStatus();
@@ -366,7 +366,7 @@ export default function Dashboard() {
     queryKey: ['account'],
     queryFn: () => tradesApi.getAccount(),
     staleTime: 60_000,
-    enabled: !!alpacaConnected,
+    enabled: !!ibkrConnected,
   });
 
   const account      = accountData?.account;
@@ -421,8 +421,8 @@ export default function Dashboard() {
             </div>
           </motion.div>
 
-          {/* ── Alpaca Connect Banner ─────────────────────────── */}
-          {!alpacaConnected && (
+          {/* ── IBKR Connect Banner ─────────────────────────── */}
+          {!ibkrConnected && (
             <motion.div variants={item}>
               <AlpacaConnectBanner />
             </motion.div>
@@ -440,10 +440,10 @@ export default function Dashboard() {
           <motion.div variants={container} className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
             {accountLoading ? (
               [1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)
-            ) : !alpacaConnected || !account ? (
+            ) : !ibkrConnected || !account ? (
               <motion.div variants={item} className="card p-5 col-span-full flex items-center justify-center gap-3 py-8">
                 <p className="text-sm font-sans text-off-white/40">
-                  Connect your Alpaca account to see live portfolio data
+                  Connect your Interactive Brokers account to see live portfolio data
                 </p>
                 <Link
                   to="/account"

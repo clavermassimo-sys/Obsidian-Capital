@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { tradesApi } from '@/services/api';
-import type { AlpacaOrder } from '@/services/api';
+import type { IBKROrder } from '@/services/api';
 import {
   Download,
   Filter,
@@ -47,7 +47,7 @@ function normaliseStatus(s: string): DisplayOrder['status'] {
   return 'pending';
 }
 
-function normaliseOrder(o: AlpacaOrder): DisplayOrder {
+function normaliseOrder(o: IBKROrder): DisplayOrder {
   const qty        = parseFloat(String(o.qty))         || 0;
   const filledQty  = parseFloat(String(o.filled_qty))  || 0;
   const price      = parseFloat(String(o.filled_avg_price ?? o.limit_price ?? 0)) || 0;

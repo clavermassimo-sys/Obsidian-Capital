@@ -140,7 +140,7 @@ export interface HistoryResponse {
   history: HistoryPoint[];
 }
 
-export interface AlpacaOrder {
+export interface IBKROrder {
   id: string;
   symbol: string;
   side: 'buy' | 'sell';
@@ -156,8 +156,11 @@ export interface AlpacaOrder {
   commission?: number;
 }
 
+/** @deprecated Use IBKROrder */
+export type AlpacaOrder = IBKROrder;
+
 export interface OrdersResponse {
-  orders: AlpacaOrder[];
+  orders: IBKROrder[];
 }
 
 export interface AccountData {
@@ -239,4 +242,14 @@ export const tradesApi = {
 
   placeOrder: (params: PlaceOrderParams) =>
     api.post('/trades/order', params).then((r) => r.data),
+};
+
+// ── IBKR API ──────────────────────────────────────────────────
+
+export const ibkrApi = {
+  connect: () => api.get<{ authUrl: string }>('/trades/ibkr/connect'),
+  getStatus: () => api.get<{ connected: boolean; accountId?: string; paperMode: boolean }>('/trades/ibkr/status'),
+  disconnect: () => api.post('/trades/ibkr/disconnect'),
+  getMode: () => api.get<{ paperMode: boolean }>('/trades/mode'),
+  setMode: (paperMode: boolean) => api.post('/trades/mode', { paperMode }),
 };

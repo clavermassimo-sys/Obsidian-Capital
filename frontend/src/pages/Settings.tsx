@@ -303,7 +303,7 @@ function SecurityTab() {
   const [twoFAEnabled, setTwoFAEnabled] = useState(false);
   const [changingPw, setChangingPw]   = useState(false);
   const [pwSuccess, setPwSuccess]     = useState(false);
-  const [alpacaConnected, setAlpacaConnected] = useState(true);
+  const [ibkrConnected, setIbkrConnected] = useState(true);
   const [disconnectModal, setDisconnectModal] = useState(false);
 
   const sessions = [
@@ -505,24 +505,27 @@ function SecurityTab() {
         </button>
       </div>
 
-      {/* Connected Apps — Alpaca */}
+      {/* Connected Apps — Interactive Brokers */}
       <div className="border-t border-border pt-6">
-        <h3 className="font-serif text-lg text-off-white mb-4">Connected Apps</h3>
+        <h3 className="font-serif text-lg text-off-white mb-1">Interactive Brokers Connection</h3>
+        <p className="text-sm text-off-white/50 font-sans mb-4">
+          Required to execute trades. Your funds are held at Interactive Brokers LLC, member FINRA/SIPC.
+        </p>
         <div className="bg-surface-2 border border-border rounded-xl p-5">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-obsidian border border-border flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 rounded-lg bg-[#003087] border border-[#003087]/60 flex items-center justify-center flex-shrink-0">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <rect width="24" height="24" rx="4" fill="#FFCE00" />
-                  <text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="bold" fill="#0a0a0a">A</text>
+                  <rect width="24" height="24" rx="4" fill="#003087" />
+                  <text x="12" y="17" textAnchor="middle" fontSize="12" fontWeight="bold" fill="#FFFFFF">IB</text>
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-medium text-off-white font-sans">Alpaca Securities</p>
-                {alpacaConnected ? (
+                <p className="text-sm font-medium text-off-white font-sans">Interactive Brokers LLC</p>
+                {ibkrConnected ? (
                   <>
                     <p className="text-xs text-off-white/40 font-sans mt-0.5">
-                      Account: <span className="font-mono text-off-white/60">ALP-289471-X</span>
+                      Account: <span className="font-mono text-off-white/60">U1289471</span>
                     </p>
                     <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-gain/10 border border-gain/20 rounded text-xs text-gain font-sans">
                       <span className="w-1.5 h-1.5 rounded-full bg-gain inline-block" />
@@ -530,11 +533,11 @@ function SecurityTab() {
                     </span>
                   </>
                 ) : (
-                  <p className="text-xs text-off-white/40 font-sans mt-0.5">Not connected</p>
+                  <p className="text-xs text-off-white/40 font-sans mt-0.5">Not connected — required to trade</p>
                 )}
               </div>
             </div>
-            {alpacaConnected ? (
+            {ibkrConnected ? (
               <button
                 onClick={() => setDisconnectModal(true)}
                 className={btnDanger}
@@ -544,7 +547,7 @@ function SecurityTab() {
             ) : (
               <button className={btnPrimary}>
                 <LinkIcon className="w-4 h-4" />
-                Connect Alpaca Account
+                Connect IBKR Account
               </button>
             )}
           </div>
@@ -553,10 +556,10 @@ function SecurityTab() {
 
       <ConfirmModal
         open={disconnectModal}
-        title="Disconnect Alpaca Account?"
-        message="This will remove your Alpaca Securities connection. You will not be able to place trades until you reconnect. Your positions and account history remain with Alpaca."
+        title="Disconnect Interactive Brokers Account?"
+        message="This will remove your Interactive Brokers connection. You will not be able to place trades until you reconnect. Your positions and account history remain with Interactive Brokers."
         confirmLabel="Disconnect"
-        onConfirm={() => setAlpacaConnected(false)}
+        onConfirm={() => setIbkrConnected(false)}
         onClose={() => setDisconnectModal(false)}
         danger
       />

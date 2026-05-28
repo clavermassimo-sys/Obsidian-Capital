@@ -19,8 +19,11 @@ import {
   Check,
   ChevronRight,
   Info,
+  ChevronDown,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth, type RegisterPayload } from '@/contexts/AuthContext';
+import { getIBKRAuthUrl } from '@/services/ibkr';
 
 // ── Logo ──────────────────────────────────────────────────────
 
@@ -40,10 +43,11 @@ function GemLogoSmall() {
 const STEPS = [
   { num: 1, label: 'Account Info'   },
   { num: 2, label: 'Identity (KYC)' },
-  { num: 3, label: 'Choose Tier'    },
+  { num: 3, label: 'Link IBKR'      },
+  { num: 4, label: 'Choose Tier'    },
 ];
 
-function StepProgress({ current }: { current: 1 | 2 | 3 }) {
+function StepProgress({ current }: { current: 1 | 2 | 3 | 4 }) {
   return (
     <div className="flex items-center justify-between mb-8">
       {STEPS.map((step, idx) => {
@@ -122,7 +126,9 @@ interface FormData {
   city: string;
   state: string;
   zip: string;
-  // Step 3
+  // Step 3 — IBKR
+  ibkrOption: 'existing' | 'new' | '';
+  // Step 4
   tier: 'standard' | 'private';
   regBiAccepted: boolean;
 }
@@ -130,6 +136,7 @@ interface FormData {
 const INITIAL_FORM: FormData = {
   name: '', email: '', password: '', confirmPassword: '',
   dob: '', ssnLast4: '', address: '', city: '', state: '', zip: '',
+  ibkrOption: '',
   tier: 'standard', regBiAccepted: false,
 };
 
@@ -369,7 +376,172 @@ function Step2({ data, onChange, onNext, onBack }: Step2Props) {
   );
 }
 
-// ── Step 3: Tier Selection ────────────────────────────────────
+// ── Step 3: IBKR Account Setup ───────────────────────────────
+
+interface Step3IBKRProps {
+  data: FormData;
+  onChange: (patch: Partial<FormData>) => void;
+  onNext: () => void;
+  onBack: () => void;
+}
+
+function Step3IBKR({ data, onChange, onNext, onBack }: Step3IBKRProps) {
+  const [whyExpanded, setWhyExpanded] = useState(false);
+
+  return (
+    <div className="space-y-5">
+      {/* Heading explanation */}
+      <div className="flex items-start gap-2.5 p-3 rounded-lg bg-gold/5 border border-gold/15">
+        <Info size={13} className="text-gold/70 flex-shrink-0 mt-0.5" />
+        <p className="text-xs text-off-white/50 leading-relaxed">
+          Obsidian Capital uses Interactive Brokers to execute your trades. You'll need an IBKR
+          account to trade. You can skip this step and connect later, but trading will be disabled
+          until your IBKR account is linked.
+        </p>
+      </div>
+
+      {/* IBKR logo placeholder */}
+      <div className="flex items-center gap-3">
+        <div
+          className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-white text-lg flex-shrink-0"
+          style={{ background: '#003087' }}
+        >
+          IB
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-off-white">Interactive Brokers</p>
+          <p className="text-xs text-off-white/40">Your brokerage partner</p>
+        </div>
+      </div>
+
+      {/* Radio options */}
+      <div className="space-y-3">
+        {/* Option A: existing account */}
+        <label
+          className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200
+            ${data.ibkrOption === 'existing'
+              ? 'bg-gold/5 border-gold/40'
+              : 'bg-surface border-border hover:border-gold/20'
+            }`}
+        >
+          <input
+            type="radio"
+            name="ibkrOption"
+            value="existing"
+            checked={data.ibkrOption === 'existing'}
+            onChange={() => onChange({ ibkrOption: 'existing' })}
+            className="mt-0.5 accent-gold flex-shrink-0"
+          />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-off-white mb-0.5">
+              I already have an Interactive Brokers account
+            </p>
+            <p className="text-xs text-off-white/40">
+              Connect your existing IBKR account via secure OAuth.
+            </p>
+            {data.ibkrOption === 'existing' && (
+              <button
+                type="button"
+                onClick={() => window.open(getIBKRAuthUrl(), '_blank')}
+                className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
+                           text-obsidian transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
+                style={{ background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)' }}
+              >
+                Connect IBKR Account
+                <ExternalLink size={13} />
+              </button>
+            )}
+          </div>
+        </label>
+
+        {/* Option B: create new account */}
+        <label
+          className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200
+            ${data.ibkrOption === 'new'
+              ? 'bg-gold/5 border-gold/40'
+              : 'bg-surface border-border hover:border-gold/20'
+            }`}
+        >
+          <input
+            type="radio"
+            name="ibkrOption"
+            value="new"
+            checked={data.ibkrOption === 'new'}
+            onChange={() => onChange({ ibkrOption: 'new' })}
+            className="mt-0.5 accent-gold flex-shrink-0"
+          />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-off-white mb-0.5">
+              I need to create an Interactive Brokers account
+            </p>
+            <p className="text-xs text-off-white/40">
+              Open a new IBKR account. Takes 5–10 minutes — you can complete it now or after
+              finishing registration.
+            </p>
+            {data.ibkrOption === 'new' && (
+              <a
+                href="https://www.interactivebrokers.com/en/trading/open-account.php"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
+                           text-obsidian transition-all duration-200 hover:brightness-110 active:scale-[0.98]"
+                style={{ background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)' }}
+              >
+                Open IBKR Account
+                <ExternalLink size={13} />
+              </a>
+            )}
+          </div>
+        </label>
+      </div>
+
+      {/* Why IBKR? expandable */}
+      <div className="rounded-xl border border-border bg-surface overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setWhyExpanded((p) => !p)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-off-white/60 hover:text-off-white transition-colors"
+        >
+          <span>Why Interactive Brokers?</span>
+          <ChevronDown
+            size={14}
+            className={`transition-transform duration-200 ${whyExpanded ? 'rotate-180' : ''}`}
+          />
+        </button>
+        {whyExpanded && (
+          <div className="px-4 pb-4">
+            <p className="text-xs text-off-white/45 leading-relaxed">
+              Interactive Brokers is one of the world's largest electronic brokers with over $12B
+              in equity capital, member FINRA/SIPC. Your funds are held directly at IBKR, separate
+              from Obsidian Capital's accounts. This means your assets are protected even if
+              Obsidian Capital ceases operations.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-3 pt-2">
+        <button type="button" onClick={onBack}
+          className="flex-1 h-11 rounded-xl text-sm font-medium text-off-white/60 border border-border
+                     hover:border-off-white/30 hover:text-off-white transition-all duration-200">
+          Back
+        </button>
+        <button type="button" onClick={onNext}
+          className="flex-1 h-11 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold
+                     text-obsidian transition-all duration-250 active:scale-[0.98]"
+          style={{ background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)' }}>
+          {data.ibkrOption ? 'Continue' : 'Skip for Now'} <ChevronRight size={16} />
+        </button>
+      </div>
+
+      <p className="text-xs text-center text-off-white/25">
+        You can connect your IBKR account later in Settings → Security.
+      </p>
+    </div>
+  );
+}
+
+// ── Step 4: Tier Selection ────────────────────────────────────
 
 const TIER_FEATURES = {
   standard: [
@@ -391,7 +563,7 @@ const TIER_FEATURES = {
   ],
 };
 
-interface Step3Props {
+interface Step4Props {
   data: FormData;
   onChange: (patch: Partial<FormData>) => void;
   onBack: () => void;
@@ -400,7 +572,7 @@ interface Step3Props {
   error: string;
 }
 
-function Step3({ data, onChange, onBack, onSubmit, submitting, error }: Step3Props) {
+function Step4({ data, onChange, onBack, onSubmit, submitting, error }: Step4Props) {
   const [regBiError, setRegBiError] = useState('');
 
   function handleSubmit() {
@@ -564,7 +736,7 @@ function Step3({ data, onChange, onBack, onSubmit, submitting, error }: Step3Pro
 // ── Main Component ────────────────────────────────────────────
 
 export default function Register() {
-  const [step, setStep]     = useState<1 | 2 | 3>(1);
+  const [step, setStep]     = useState<1 | 2 | 3 | 4>(1);
   const [form, setForm]     = useState<FormData>(INITIAL_FORM);
   const [submitting, setSub] = useState(false);
   const [error, setError]   = useState('');
@@ -606,9 +778,10 @@ export default function Register() {
   }
 
   const STEP_TITLES = [
-    { title: 'Create Account',    sub: 'Set up your login credentials' },
-    { title: 'Verify Identity',   sub: 'Required by federal law (KYC)'  },
-    { title: 'Choose Your Tier',  sub: 'Select your membership level'   },
+    { title: 'Create Account',          sub: 'Set up your login credentials'            },
+    { title: 'Verify Identity',         sub: 'Required by federal law (KYC)'             },
+    { title: 'Set Up Trading Account',  sub: 'Link your Interactive Brokers account'    },
+    { title: 'Choose Your Tier',        sub: 'Select your membership level'             },
   ];
   const { title, sub } = STEP_TITLES[step - 1];
 
@@ -652,7 +825,10 @@ export default function Register() {
             <Step2 data={form} onChange={patch} onNext={() => setStep(3)} onBack={() => setStep(1)} />
           )}
           {step === 3 && (
-            <Step3 data={form} onChange={patch} onBack={() => setStep(2)}
+            <Step3IBKR data={form} onChange={patch} onNext={() => setStep(4)} onBack={() => setStep(2)} />
+          )}
+          {step === 4 && (
+            <Step4 data={form} onChange={patch} onBack={() => setStep(3)}
               onSubmit={handleSubmit} submitting={submitting} error={error} />
           )}
 

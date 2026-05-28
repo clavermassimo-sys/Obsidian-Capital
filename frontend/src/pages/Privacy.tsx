@@ -87,7 +87,7 @@ export default function Privacy() {
           <p>We use the information we collect for the following purposes:</p>
           <ul className="list-disc list-inside space-y-1.5 pl-2">
             <li>Verify your identity and comply with KYC/AML regulatory requirements</li>
-            <li>Open and maintain your brokerage account with Alpaca Securities</li>
+            <li>Open and maintain your brokerage account with Interactive Brokers LLC</li>
             <li>Process transactions, deposits, and withdrawals</li>
             <li>Calculate and collect platform commissions and subscription fees</li>
             <li>Generate tax documents (1099-B, 1099-DIV) as required by the IRS</li>
@@ -106,10 +106,10 @@ export default function Privacy() {
           </p>
           <div className="space-y-3">
             <div className="bg-surface-2 border border-border rounded-lg p-4">
-              <p className="text-off-white/80 font-medium mb-1 text-sm">Alpaca Securities LLC</p>
+              <p className="text-off-white/80 font-medium mb-1 text-sm">Interactive Brokers LLC</p>
               <p className="text-xs">
-                We share identity, financial, and trading information with Alpaca Securities to open
-                and maintain your brokerage account and execute trades. Alpaca Securities is governed
+                We share identity, financial, and trading information with Interactive Brokers LLC to open
+                and maintain your brokerage account and execute trades. Interactive Brokers LLC is governed
                 by its own privacy policy and FINRA regulations.
               </p>
             </div>

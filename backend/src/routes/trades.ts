@@ -3,7 +3,8 @@ import Joi from 'joi';
 import { v4 as uuidv4 } from 'uuid';
 import { authenticate, requireKyc } from '../middleware/auth';
 import { tradeLimiter } from '../middleware/rateLimit';
-import { alpacaService, AlpacaService } from '../services/alpaca';
+import { IBKRService, exchangeIBKRCode, getIBKRAuthUrl } from '../services/ibkr';
+import { polygonService } from '../services/polygon';
 import { stripeService } from '../services/stripe';
 import { getCommissionBreakdown } from '../middleware/commission';
 import { query, transaction } from '../config/database';
@@ -18,38 +19,38 @@ router.use(authenticate);
 const orderSchema = Joi.object({
   ticker: Joi.string().trim().uppercase().min(1).max(10).required(),
   company_name: Joi.string().trim().min(1).max(200).required(),
-  side: Joi.string().valid('buy', 'sell').required(),
-  // qty OR notional must be provided (not both)
-  qty: Joi.number().positive().precision(6).max(1000000),
-  notional: Joi.number().positive().precision(2).max(10000000),
+  // conid is the IBKR contract ID — required for live orders
+  conid: Joi.number().integer().positive().required(),
+  side: Joi.string().valid('BUY', 'SELL').required(),
+  qty: Joi.number().positive().precision(6).max(1000000).required(),
   orderType: Joi.string()
-    .valid('market', 'limit', 'stop', 'stop_limit', 'trailing_stop')
-    .default('market'),
-  time_in_force: Joi.string().valid('day', 'gtc', 'ioc', 'fok').default('day'),
-  limitPrice: Joi.when('orderType', {
-    is: Joi.string().valid('limit', 'stop_limit'),
+    .valid('MKT', 'LMT', 'STP', 'STP LMT', 'TRAIL')
+    .default('MKT'),
+  tif: Joi.string().valid('DAY', 'GTC', 'IOC', 'FOK').default('DAY'),
+  price: Joi.when('orderType', {
+    is: Joi.string().valid('LMT', 'STP LMT'),
     then: Joi.number().positive().precision(2).required(),
     otherwise: Joi.number().optional(),
   }),
-  stopPrice: Joi.when('orderType', {
-    is: Joi.string().valid('stop', 'stop_limit'),
+  auxPrice: Joi.when('orderType', {
+    is: Joi.string().valid('STP', 'STP LMT'),
     then: Joi.number().positive().precision(2).required(),
     otherwise: Joi.number().optional(),
   }),
-  trailPercent: Joi.when('orderType', {
-    is: 'trailing_stop',
+  trailingPercent: Joi.when('orderType', {
+    is: 'TRAIL',
     then: Joi.number().positive().precision(2).required(),
     otherwise: Joi.number().optional(),
   }),
-  // Optional price estimate for commission preview (used for notional orders)
+  // Optional price estimate for commission preview (used when live price is unavailable)
   estimatedPrice: Joi.number().positive().optional(),
-}).or('qty', 'notional');
+});
 
-const connectAlpacaSchema = Joi.object({
+const connectIBKRSchema = Joi.object({
   access_token: Joi.string().required(),
   refresh_token: Joi.string().optional().allow(''),
-  paper_mode: Joi.boolean().default(true),
-  alpaca_account_id: Joi.string().optional().allow(''),
+  paper_mode: Joi.boolean().default(false),
+  ibkr_account_id: Joi.string().optional().allow(''),
 });
 
 // ─── GET /trades/preview ──────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ router.get('/preview', async (req: Request, res: Response): Promise<void> => {
 });
 
 // ─── POST /trades/order ───────────────────────────────────────────────────────
-// Place order via Alpaca, record commission, charge Stripe if on file
+// Place order via IBKR, record commission, charge Stripe if on file
 
 router.post(
   '/order',
@@ -107,14 +108,14 @@ router.post(
     const {
       ticker,
       company_name,
+      conid,
       side,
       qty,
-      notional,
       orderType,
-      time_in_force,
-      limitPrice,
-      stopPrice,
-      trailPercent,
+      tif,
+      price,
+      auxPrice,
+      trailingPercent,
       estimatedPrice,
     } = value;
 
@@ -122,12 +123,12 @@ router.post(
     const tier = req.user!.tier as 'standard' | 'member' | 'private';
 
     try {
-      // ─── 1. Look up user's data (Alpaca connection, Stripe customer) ────────
+      // ─── 1. Look up user's IBKR connection and Stripe customer ──────────────
       const userResult = await query(
-        `SELECT u.tier, u.stripe_customer_id, u.alpaca_connected,
-                ac.access_token, ac.paper_mode
+        `SELECT u.tier, u.stripe_customer_id, u.ibkr_connected,
+                ic.access_token, ic.account_id AS ibkr_account_id, ic.paper_mode
          FROM users u
-         LEFT JOIN alpaca_connections ac ON ac.user_id = u.id
+         LEFT JOIN ibkr_connections ic ON ic.user_id = u.id
          WHERE u.id = $1`,
         [userId]
       );
@@ -140,31 +141,27 @@ router.post(
       const userRow = userResult.rows[0];
       const stripeCustomerId: string | null = userRow.stripe_customer_id || null;
 
-      // ─── 2. Build the Alpaca service instance ────────────────────────────────
-      // Use user's personal OAuth token if available; fall back to platform key
-      let alpacaClient: AlpacaService;
-      if (userRow.alpaca_connected && userRow.access_token) {
-        alpacaClient = new AlpacaService(
-          userRow.access_token,
-          '', // OAuth token — secret not needed
-          userRow.paper_mode ?? true
-        );
-      } else {
-        alpacaClient = alpacaService; // platform-level paper key
+      if (!userRow.ibkr_connected || !userRow.access_token) {
+        res.status(403).json({
+          success: false,
+          error: 'Interactive Brokers account is not connected. Please link your IBKR account first.',
+          code: 'IBKR_NOT_CONNECTED',
+        });
+        return;
       }
 
-      // ─── 3. Calculate commission on subtotal ─────────────────────────────────
-      // For notional orders, subtotal = notional; for qty orders, try to get price
+      const ibkrAccountId = userRow.ibkr_account_id as string;
+      const ibkrClient = new IBKRService(userRow.access_token as string);
+
+      // ─── 2. Calculate commission on subtotal ─────────────────────────────────
       let subtotal: number;
-      if (notional) {
-        subtotal = notional;
-      } else if (estimatedPrice) {
+      if (estimatedPrice) {
         subtotal = parseFloat((qty * estimatedPrice).toFixed(2));
       } else {
         // Attempt to get a live quote for commission calculation
         try {
-          const trade = await alpacaService.getLatestTrade(ticker);
-          subtotal = parseFloat((qty * trade.price).toFixed(2));
+          const quote = await polygonService.getQuote(ticker);
+          subtotal = parseFloat((qty * quote.price).toFixed(2));
         } catch {
           // If market data is unavailable, fall back to a rough estimate
           subtotal = qty * 100; // placeholder; commission will be updated post-fill
@@ -173,33 +170,30 @@ router.post(
 
       const commission = getCommissionBreakdown(subtotal, tier);
 
-      // ─── 4. Submit order to Alpaca ───────────────────────────────────────────
-      const alpacaOrder = await alpacaClient.placeOrder({
-        symbol: ticker,
-        qty: qty,
-        notional: notional,
-        side,
-        type: orderType,
-        time_in_force,
-        limit_price: limitPrice,
-        stop_price: stopPrice,
-        trail_percent: trailPercent,
+      // ─── 3. Submit order to IBKR ─────────────────────────────────────────────
+      const ibkrOrder = await ibkrClient.placeOrder({
+        acctId: ibkrAccountId,
+        conid,
+        side: side as 'BUY' | 'SELL',
+        orderType: orderType as 'MKT' | 'LMT' | 'STP' | 'STP LMT' | 'TRAIL',
+        quantity: qty,
+        tif: tif as 'DAY' | 'GTC' | 'IOC' | 'FOK',
+        ...(price !== undefined && { price }),
+        ...(auxPrice !== undefined && { auxPrice }),
+        ...(trailingPercent !== undefined && { trailingPercent }),
       });
 
-      // ─── 5. Record trade + commission in DB ──────────────────────────────────
+      // ─── 4. Record trade + commission in DB ──────────────────────────────────
       const tradeId = uuidv4();
-      const filledPrice = alpacaOrder.filled_avg_price
-        ? parseFloat(alpacaOrder.filled_avg_price)
-        : null;
-      const filledQty = parseFloat(alpacaOrder.filled_qty || '0') || qty;
-      const tradeStatus =
-        alpacaOrder.status === 'filled'
-          ? 'completed'
-          : alpacaOrder.status === 'canceled'
-          ? 'cancelled'
-          : 'pending';
+      const filledPrice = ibkrOrder.avgFillPrice ?? (price ?? null);
+      const filledQty = ibkrOrder.filledQuantity > 0 ? ibkrOrder.filledQuantity : qty;
 
-      // Final subtotal based on fill (if available) or estimate
+      const ibkrStatus = ibkrOrder.status?.toLowerCase() ?? 'submitted';
+      const tradeStatus =
+        ibkrStatus === 'filled' ? 'completed'
+        : ibkrStatus === 'cancelled' || ibkrStatus === 'canceled' ? 'cancelled'
+        : 'pending';
+
       const finalSubtotal =
         filledPrice && filledQty
           ? parseFloat((filledQty * filledPrice).toFixed(2))
@@ -208,7 +202,6 @@ router.post(
       const finalCommission = getCommissionBreakdown(finalSubtotal, tier);
 
       await transaction(async (client) => {
-        // Insert trade record
         await client.query(
           `INSERT INTO trades (
              id, user_id, ticker, company_name, type, shares, price,
@@ -219,17 +212,16 @@ router.post(
             userId,
             ticker,
             company_name,
-            side,
+            side.toLowerCase() === 'buy' ? 'buy' : 'sell',
             filledQty,
             filledPrice ?? 0,
             finalCommission.amount,
             finalCommission.total,
             tradeStatus,
-            orderType,
+            orderType.toLowerCase(),
           ]
         );
 
-        // Insert commission record
         await client.query(
           `INSERT INTO commissions (
              trade_id, user_id, tier, trade_value, commission_rate,
@@ -246,7 +238,7 @@ router.post(
         );
       });
 
-      // ─── 6. Charge Stripe commission if customer has payment method ──────────
+      // ─── 5. Charge Stripe commission if customer has payment method ──────────
       let stripePaymentIntent: string | null = null;
       if (stripeCustomerId && finalCommission.amount > 0) {
         try {
@@ -265,7 +257,6 @@ router.post(
             });
             stripePaymentIntent = pi.id;
 
-            // Update commission record with Stripe details
             await query(
               `UPDATE commissions
                SET stripe_payment_intent_id = $1,
@@ -276,7 +267,6 @@ router.post(
             );
           }
         } catch (stripeErr) {
-          // Non-blocking: log and mark failed; do not abort the trade response
           console.error('[Trades] Stripe commission charge failed for trade', tradeId, stripeErr);
           await query(
             `UPDATE commissions SET payment_status = 'failed' WHERE trade_id = $1`,
@@ -285,12 +275,12 @@ router.post(
         }
       }
 
-      // ─── 7. Return response ──────────────────────────────────────────────────
+      // ─── 6. Return response ──────────────────────────────────────────────────
       res.status(201).json({
         success: true,
-        message: `${side === 'buy' ? 'Purchase' : 'Sale'} order submitted successfully.`,
+        message: `${side === 'BUY' ? 'Purchase' : 'Sale'} order submitted successfully.`,
         data: {
-          order: alpacaOrder,
+          order: ibkrOrder,
           trade_id: tradeId,
           commission: finalCommission,
           stripe_payment_intent: stripePaymentIntent,
@@ -304,12 +294,11 @@ router.post(
       const e = err as Error;
       console.error('[Trades] Order error:', e.message);
 
-      // Map Alpaca errors to user-friendly responses
       if (e.message.includes('Unprocessable') || e.message.includes('insufficient')) {
         res.status(422).json({
           success: false,
           error: e.message,
-          code: 'ALPACA_ORDER_REJECTED',
+          code: 'IBKR_ORDER_REJECTED',
         });
         return;
       }
@@ -323,13 +312,18 @@ router.post(
         return;
       }
 
+      if (e.message.includes('IBKR_NOT_CONNECTED')) {
+        res.status(403).json({ success: false, error: e.message, code: 'IBKR_NOT_CONNECTED' });
+        return;
+      }
+
       res.status(500).json({ success: false, error: 'Failed to execute order.' });
     }
   }
 );
 
 // ─── GET /trades/orders ───────────────────────────────────────────────────────
-// Order history from our DB, enriched with Alpaca status if available
+// Order history from our DB, optionally enriched with live IBKR status
 
 router.get('/orders', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -404,39 +398,39 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
 });
 
 // ─── DELETE /trades/orders/:orderId ──────────────────────────────────────────
-// Cancel an open order on Alpaca
+// Cancel an open order on IBKR
 
 router.delete('/orders/:orderId', async (req: Request, res: Response): Promise<void> => {
   try {
     const { orderId } = req.params;
     const userId = req.user!.userId;
 
-    // Look up user's Alpaca connection
     const connResult = await query(
-      `SELECT ac.access_token, ac.paper_mode
-       FROM alpaca_connections ac
-       WHERE ac.user_id = $1`,
+      `SELECT ic.access_token, ic.account_id, ic.paper_mode
+       FROM ibkr_connections ic
+       WHERE ic.user_id = $1`,
       [userId]
     );
 
-    let client: AlpacaService;
-    if (connResult.rows.length > 0 && connResult.rows[0].access_token) {
-      client = new AlpacaService(
-        connResult.rows[0].access_token,
-        '',
-        connResult.rows[0].paper_mode ?? true
-      );
-    } else {
-      client = alpacaService;
+    if (connResult.rows.length === 0 || !connResult.rows[0].access_token) {
+      res.status(403).json({
+        success: false,
+        error: 'Interactive Brokers account is not connected.',
+        code: 'IBKR_NOT_CONNECTED',
+      });
+      return;
     }
 
-    await client.cancelOrder(orderId);
+    const { access_token, account_id } = connResult.rows[0];
+    const client = new IBKRService(access_token as string);
+
+    await client.cancelOrder(account_id as string, orderId);
 
     // Update local DB if we have a matching trade
     await query(
       `UPDATE trades SET status = 'cancelled' WHERE id = $1 AND user_id = $2`,
       [orderId, userId]
-    ).catch(() => undefined); // Non-blocking; Alpaca order ID may differ from our trade ID
+    ).catch(() => undefined);
 
     res.json({ success: true, message: 'Order cancelled successfully.' });
   } catch (err) {
@@ -453,46 +447,47 @@ router.delete('/orders/:orderId', async (req: Request, res: Response): Promise<v
 });
 
 // ─── GET /trades/positions ────────────────────────────────────────────────────
-// Current open positions from Alpaca
+// Current open positions from IBKR
 
 router.get('/positions', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
 
     const connResult = await query(
-      `SELECT ac.access_token, ac.paper_mode
-       FROM alpaca_connections ac
-       WHERE ac.user_id = $1`,
+      `SELECT ic.access_token, ic.account_id, ic.paper_mode
+       FROM ibkr_connections ic
+       WHERE ic.user_id = $1`,
       [userId]
     );
 
-    let client: AlpacaService;
-    if (connResult.rows.length > 0 && connResult.rows[0].access_token) {
-      client = new AlpacaService(
-        connResult.rows[0].access_token,
-        '',
-        connResult.rows[0].paper_mode ?? true
-      );
-    } else {
-      client = alpacaService;
+    if (connResult.rows.length === 0 || !connResult.rows[0].access_token) {
+      // Return empty positions for users without IBKR connection
+      res.json({
+        success: true,
+        data: { positions: [], count: 0 },
+        message: 'No Interactive Brokers account connected.',
+      });
+      return;
     }
 
-    const positions = await client.getPositions();
+    const { access_token, account_id } = connResult.rows[0];
+    const client = new IBKRService(access_token as string);
+
+    const positions = await client.getPositions(account_id as string);
 
     res.json({
       success: true,
       data: {
         positions: positions.map((p) => ({
-          ...p,
-          qty: parseFloat(p.qty),
-          avg_entry_price: parseFloat(p.avg_entry_price),
-          market_value: parseFloat(p.market_value),
-          cost_basis: parseFloat(p.cost_basis),
-          unrealized_pl: parseFloat(p.unrealized_pl),
-          unrealized_plpc: parseFloat(p.unrealized_plpc),
-          current_price: parseFloat(p.current_price),
-          lastday_price: parseFloat(p.lastday_price),
-          change_today: parseFloat(p.change_today),
+          conid: p.conid,
+          symbol: p.contractDesc,
+          acct_id: p.acctId,
+          quantity: p.position,
+          avg_cost: p.avgCost,
+          market_price: p.mktPrice,
+          market_value: p.mktValue,
+          unrealized_pnl: p.unrealizedPnl,
+          realized_pnl: p.realizedPnl,
         })),
         count: positions.length,
       },
@@ -505,46 +500,42 @@ router.get('/positions', async (req: Request, res: Response): Promise<void> => {
 });
 
 // ─── GET /trades/account ──────────────────────────────────────────────────────
-// Alpaca account info (buying power, equity, etc.)
+// IBKR account info (available funds, net liquidation, etc.)
 
 router.get('/account', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
 
     const connResult = await query(
-      `SELECT ac.access_token, ac.paper_mode, ac.alpaca_account_id
-       FROM alpaca_connections ac
-       WHERE ac.user_id = $1`,
+      `SELECT ic.access_token, ic.account_id, ic.paper_mode, ic.account_type
+       FROM ibkr_connections ic
+       WHERE ic.user_id = $1`,
       [userId]
     );
 
-    let client: AlpacaService;
-    let paperMode = true;
-
-    if (connResult.rows.length > 0 && connResult.rows[0].access_token) {
-      paperMode = connResult.rows[0].paper_mode ?? true;
-      client = new AlpacaService(connResult.rows[0].access_token, '', paperMode);
-    } else {
-      client = alpacaService;
-      paperMode = alpacaService.isPaperMode();
+    if (connResult.rows.length === 0 || !connResult.rows[0].access_token) {
+      res.json({
+        success: true,
+        data: {
+          account: null,
+          ibkr_connected: false,
+        },
+        message: 'No Interactive Brokers account connected.',
+      });
+      return;
     }
 
-    const account = await client.getAccount();
+    const { access_token, account_id, paper_mode } = connResult.rows[0];
+    const client = new IBKRService(access_token as string);
+
+    const account = await client.getAccount(account_id as string);
 
     res.json({
       success: true,
       data: {
-        account: {
-          ...account,
-          buying_power: parseFloat(account.buying_power),
-          cash: parseFloat(account.cash),
-          portfolio_value: parseFloat(account.portfolio_value),
-          equity: parseFloat(account.equity),
-          last_equity: parseFloat(account.last_equity),
-          long_market_value: parseFloat(account.long_market_value),
-          short_market_value: parseFloat(account.short_market_value),
-        },
-        paper_mode: paperMode,
+        account,
+        paper_mode: paper_mode ?? false,
+        ibkr_connected: true,
       },
     });
   } catch (err) {
@@ -554,11 +545,11 @@ router.get('/account', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// ─── POST /trades/alpaca/connect ──────────────────────────────────────────────
-// Store user's Alpaca OAuth tokens after completing the OAuth flow
+// ─── POST /trades/ibkr/connect ────────────────────────────────────────────────
+// Store user's IBKR OAuth tokens after completing the OAuth flow
 
-router.post('/alpaca/connect', async (req: Request, res: Response): Promise<void> => {
-  const { error, value } = connectAlpacaSchema.validate(req.body, { abortEarly: false });
+router.post('/ibkr/connect', async (req: Request, res: Response): Promise<void> => {
+  const { error, value } = connectIBKRSchema.validate(req.body, { abortEarly: false });
   if (error) {
     res.status(400).json({
       success: false,
@@ -568,24 +559,28 @@ router.post('/alpaca/connect', async (req: Request, res: Response): Promise<void
     return;
   }
 
-  const { access_token, refresh_token, paper_mode, alpaca_account_id } = value;
+  const { access_token, refresh_token, paper_mode, ibkr_account_id } = value;
   const userId = req.user!.userId;
 
   try {
-    // Verify the token works by fetching account info
-    const testClient = new AlpacaService(access_token, '', paper_mode);
-    const account = await testClient.getAccount();
+    // Verify the token works by fetching account list
+    const testClient = new IBKRService(access_token as string);
+    const accounts = await testClient.getAccounts();
+    const primaryAccount = accounts[0];
+    const resolvedAccountId = ibkr_account_id || primaryAccount?.accountId || '';
 
     // Upsert connection record
     await query(
-      `INSERT INTO alpaca_connections (
-         id, user_id, access_token, refresh_token, paper_mode, alpaca_account_id
-       ) VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO ibkr_connections (
+         id, user_id, access_token, refresh_token, paper_mode,
+         account_id, account_type, connected_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
        ON CONFLICT (user_id) DO UPDATE SET
          access_token = EXCLUDED.access_token,
          refresh_token = EXCLUDED.refresh_token,
          paper_mode = EXCLUDED.paper_mode,
-         alpaca_account_id = EXCLUDED.alpaca_account_id,
+         account_id = EXCLUDED.account_id,
+         account_type = EXCLUDED.account_type,
          updated_at = NOW()`,
       [
         uuidv4(),
@@ -593,39 +588,118 @@ router.post('/alpaca/connect', async (req: Request, res: Response): Promise<void
         access_token,
         refresh_token || null,
         paper_mode,
-        alpaca_account_id || account.id,
+        resolvedAccountId,
+        primaryAccount?.accountType || 'INDIVIDUAL',
       ]
     );
 
-    // Mark user as Alpaca-connected
+    // Mark user as IBKR-connected
     await query(
-      `UPDATE users SET alpaca_connected = true WHERE id = $1`,
-      [userId]
+      `UPDATE users SET ibkr_connected = true, ibkr_account_id = $1 WHERE id = $2`,
+      [resolvedAccountId, userId]
     );
 
     res.json({
       success: true,
-      message: 'Alpaca account connected successfully.',
+      message: 'Interactive Brokers account connected successfully.',
       data: {
-        alpaca_account_id: account.id,
+        ibkr_account_id: resolvedAccountId,
         paper_mode,
-        account_status: account.status,
+        account_type: primaryAccount?.accountType || 'INDIVIDUAL',
+        net_liquidation: primaryAccount?.netLiquidation ?? 0,
       },
     });
   } catch (err) {
     const e = err as Error;
-    console.error('[Trades] Alpaca connect error:', e.message);
+    console.error('[Trades] IBKR connect error:', e.message);
 
-    if (e.message.includes('Forbidden') || e.message.includes('401')) {
+    if (e.message.includes('Unauthorized') || e.message.includes('401')) {
       res.status(401).json({
         success: false,
-        error: 'Invalid Alpaca access token. Please re-authorize.',
+        error: 'Invalid IBKR access token. Please re-authorize.',
       });
       return;
     }
 
-    res.status(500).json({ success: false, error: 'Failed to connect Alpaca account.' });
+    res.status(500).json({ success: false, error: 'Failed to connect Interactive Brokers account.' });
   }
+});
+
+// ─── GET /trades/ibkr/callback ────────────────────────────────────────────────
+// IBKR OAuth callback — exchanges authorization code for tokens
+
+router.get('/ibkr/callback', async (req: Request, res: Response): Promise<void> => {
+  const { code, state, error: oauthError } = req.query as Record<string, string>;
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  if (oauthError) {
+    console.error('[Trades] IBKR OAuth error:', oauthError);
+    res.redirect(`${frontendUrl}/settings/brokerage?error=${encodeURIComponent(oauthError)}`);
+    return;
+  }
+
+  if (!code) {
+    res.status(400).json({ success: false, error: 'Missing authorization code.' });
+    return;
+  }
+
+  try {
+    const tokens = await exchangeIBKRCode(code);
+
+    const userId = req.user!.userId;
+
+    // Fetch account info with new token
+    const testClient = new IBKRService(tokens.access_token);
+    const accounts = await testClient.getAccounts();
+    const primaryAccount = accounts[0];
+    const accountId = primaryAccount?.accountId || '';
+
+    const tokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+    await query(
+      `INSERT INTO ibkr_connections (
+         id, user_id, access_token, refresh_token, paper_mode,
+         account_id, account_type, token_expires_at, connected_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET
+         access_token = EXCLUDED.access_token,
+         refresh_token = EXCLUDED.refresh_token,
+         account_id = EXCLUDED.account_id,
+         account_type = EXCLUDED.account_type,
+         token_expires_at = EXCLUDED.token_expires_at,
+         updated_at = NOW()`,
+      [
+        uuidv4(),
+        userId,
+        tokens.access_token,
+        tokens.refresh_token,
+        primaryAccount?.accountType?.toLowerCase().includes('paper') ?? false,
+        accountId,
+        primaryAccount?.accountType || 'INDIVIDUAL',
+        tokenExpiresAt,
+      ]
+    );
+
+    await query(
+      `UPDATE users SET ibkr_connected = true, ibkr_account_id = $1 WHERE id = $2`,
+      [accountId, userId]
+    );
+
+    res.redirect(`${frontendUrl}/settings/brokerage?connected=true`);
+  } catch (err) {
+    const e = err as Error;
+    console.error('[Trades] IBKR callback error:', e.message);
+    res.redirect(`${frontendUrl}/settings/brokerage?error=oauth_failed`);
+  }
+});
+
+// ─── GET /trades/ibkr/auth-url ────────────────────────────────────────────────
+// Generate the IBKR OAuth authorization URL
+
+router.get('/ibkr/auth-url', (req: Request, res: Response): void => {
+  const state = uuidv4();
+  const url = getIBKRAuthUrl(state);
+  res.json({ success: true, data: { url, state } });
 });
 
 // ─── GET /trades/mode ─────────────────────────────────────────────────────────
@@ -634,22 +708,22 @@ router.post('/alpaca/connect', async (req: Request, res: Response): Promise<void
 router.get('/mode', async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await query(
-      `SELECT ac.paper_mode, u.alpaca_connected
+      `SELECT ic.paper_mode, u.ibkr_connected
        FROM users u
-       LEFT JOIN alpaca_connections ac ON ac.user_id = u.id
+       LEFT JOIN ibkr_connections ic ON ic.user_id = u.id
        WHERE u.id = $1`,
       [req.user!.userId]
     );
 
     const row = result.rows[0];
-    const paperMode = row?.paper_mode ?? true;
-    const alpacaConnected = row?.alpaca_connected ?? false;
+    const paperMode = row?.paper_mode ?? false;
+    const ibkrConnected = row?.ibkr_connected ?? false;
 
     res.json({
       success: true,
       data: {
         paper_mode: paperMode,
-        alpaca_connected: alpacaConnected,
+        ibkr_connected: ibkrConnected,
         mode_label: paperMode ? 'Paper Trading' : 'Live Trading',
       },
     });
@@ -660,7 +734,7 @@ router.get('/mode', async (req: Request, res: Response): Promise<void> => {
 });
 
 // ─── POST /trades/mode ────────────────────────────────────────────────────────
-// Toggle paper/live mode for the user
+// Toggle paper/live mode for the user (IBKR has separate paper trading accounts)
 
 router.post('/mode', async (req: Request, res: Response): Promise<void> => {
   const { paper_mode } = req.body;
@@ -675,7 +749,7 @@ router.post('/mode', async (req: Request, res: Response): Promise<void> => {
 
   try {
     const result = await query(
-      `UPDATE alpaca_connections SET paper_mode = $1, updated_at = NOW()
+      `UPDATE ibkr_connections SET paper_mode = $1, updated_at = NOW()
        WHERE user_id = $2
        RETURNING paper_mode`,
       [paper_mode, req.user!.userId]
@@ -684,8 +758,8 @@ router.post('/mode', async (req: Request, res: Response): Promise<void> => {
     if (result.rows.length === 0) {
       res.status(404).json({
         success: false,
-        error: 'No Alpaca connection found. Please connect your Alpaca account first.',
-        code: 'ALPACA_NOT_CONNECTED',
+        error: 'No Interactive Brokers connection found. Please connect your IBKR account first.',
+        code: 'IBKR_NOT_CONNECTED',
       });
       return;
     }

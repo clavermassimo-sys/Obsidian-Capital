@@ -50,6 +50,7 @@ app.use(
 );
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
+// Allows requests from the Obsidian Capital frontend, admin panel, and localhost
 
 const allowedOrigins = [FRONTEND_URL, ADMIN_URL, 'http://localhost:3000'];
 
@@ -174,7 +175,7 @@ const io = new SocketIOServer(httpServer, {
 // Track connected clients count
 let connectedClients = 0;
 
-// Mock market data — base prices for real-time simulation
+// Simulated real-time price data — base prices for market simulation
 const LIVE_TICKERS: Record<string, { name: string; price: number; trend: number }> = {
   AAPL:  { name: 'Apple Inc.',              price: 189.30, trend:  0.0002 },
   MSFT:  { name: 'Microsoft Corporation',   price: 415.60, trend:  0.0003 },
@@ -370,10 +371,13 @@ httpServer.listen(PORT, () => {
   console.log(`│    GET  /health                                  │`);
   console.log(`│    POST /api/auth/register                       │`);
   console.log(`│    POST /api/auth/login                          │`);
+  console.log(`│    GET  /api/auth/kyc/status   [Stripe Identity] │`);
+  console.log(`│    POST /api/auth/kyc/session  [Stripe Identity] │`);
   console.log(`│    GET  /api/portfolio/holdings                  │`);
-  console.log(`│    POST /api/trades/order          [Alpaca]      │`);
-  console.log(`│    GET  /api/trades/positions      [Alpaca]      │`);
-  console.log(`│    GET  /api/market/quote/:ticker  [Alpaca]      │`);
+  console.log(`│    POST /api/trades/order          [IBKR]        │`);
+  console.log(`│    GET  /api/trades/positions      [IBKR]        │`);
+  console.log(`│    GET  /api/trades/ibkr/auth-url  [IBKR OAuth]  │`);
+  console.log(`│    GET  /api/market/quote/:ticker  [Polygon.io]  │`);
   console.log(`│    GET  /api/market/crypto         [CoinGecko]   │`);
   console.log(`│    GET  /api/subscriptions/status  [Stripe]      │`);
   console.log(`│    POST /api/subscriptions/upgrade [Stripe]      │`);

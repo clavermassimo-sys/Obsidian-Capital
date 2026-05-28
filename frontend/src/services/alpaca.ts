@@ -4,13 +4,11 @@
    from ibkr.ts so existing imports continue to work.
    ============================================================ */
 
-// Re-export everything from ibkr.ts for backwards compatibility
 export {
   ibkrOAuth as alpacaOAuth,
-  IBKRConnectionStatus as AlpacaConnectionStatus,
   IBKR_OAUTH_URL as ALPACA_OAUTH_BASE,
   getIBKRAuthUrl,
   formatIBKRAccountId,
 } from './ibkr';
 
-export type { IBKRAccount as AlpacaAccount } from './ibkr';
+export type { IBKRAccount as AlpacaAccount, IBKRConnectionStatus as AlpacaConnectionStatus } from './ibkr';

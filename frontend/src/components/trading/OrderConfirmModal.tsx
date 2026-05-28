@@ -1,6 +1,6 @@
 /* ============================================================
    Obsidian Capital — OrderConfirmModal (Updated)
-   Full order summary with Alpaca disclaimer, extended order info,
+   Full order summary with IBKR disclaimer, extended order info,
    and Reg BI / risk disclosures.
    ============================================================ */
 
@@ -281,11 +281,11 @@ export function OrderConfirmModal({
 
             <div className="border-t border-border" />
 
-            {/* Alpaca / SIPC */}
+            {/* IBKR / SIPC */}
             <div className="flex items-start gap-2.5">
               <Building2 size={13} className="mt-0.5 shrink-0 text-[#3d9e6e]" />
               <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
-                Trading executed by <span className="text-[#a09a8e] font-semibold">Alpaca Securities LLC</span>,
+                Trading executed by <span className="text-[#a09a8e] font-semibold">Interactive Brokers LLC</span>,
                 member FINRA/SIPC. Your account is protected up to{' '}
                 <span className="text-[#a09a8e] font-semibold">$500,000</span> by SIPC, including up to $250,000
                 for cash claims.
@@ -298,7 +298,7 @@ export function OrderConfirmModal({
             <div className="flex items-start gap-2.5">
               <ShieldCheck size={13} className="mt-0.5 shrink-0 text-[#3d9e6e]" />
               <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
-                Obsidian Capital is not a registered broker-dealer. All brokerage services are provided through Alpaca Securities LLC.
+                Obsidian Capital is not a registered broker-dealer. All brokerage services are provided through Interactive Brokers LLC.
               </p>
             </div>
           </div>

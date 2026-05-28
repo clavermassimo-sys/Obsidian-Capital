@@ -82,7 +82,7 @@ interface TradePanelProps {
 }
 
 export function TradePanel({ onClose, className = '' }: TradePanelProps) {
-  const { user, alpacaConnected } = useAuth();
+  const { user, ibkrConnected } = useAuth();
   const { selectedTicker, setSelectedTicker, submitOrder } = useTrading();
 
   const tier: CommissionTier = user?.tier ?? 'standard';
@@ -261,8 +261,8 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
   // ── Render helpers ────────────────────────────────────────
 
   const isBuy = side === 'buy';
-  const modeLabel = alpacaConnected ? 'LIVE' : 'PAPER';
-  const modeBg    = alpacaConnected ? 'bg-[#3d9e6e]/20 text-[#3d9e6e] border-[#3d9e6e]/30' : 'bg-surface-3 text-[#6b6560] border-border';
+  const modeLabel = ibkrConnected ? 'LIVE' : 'PAPER';
+  const modeBg    = ibkrConnected ? 'bg-[#3d9e6e]/20 text-[#3d9e6e] border-[#3d9e6e]/30' : 'bg-surface-3 text-[#6b6560] border-border';
 
   const orderTypeLabel = ORDER_TYPES.find((o) => o.id === orderType)?.label ?? 'Market';
 
@@ -294,8 +294,8 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
-          {/* ── Alpaca not connected notice ─────────────────── */}
-          {!alpacaConnected && (
+          {/* ── IBKR not connected notice ─────────────────── */}
+          {!ibkrConnected && (
             <AlpacaConnectBanner compact />
           )}
 
@@ -618,7 +618,7 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
               <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
                 A commission of{' '}
                 <span className="text-[#a09a8e]">{tier === 'private' ? '5–6%' : tier === 'member' ? '7–9%' : '10–12%'}</span>{' '}
-                is charged by Obsidian Capital on all trades. This is separate from your Alpaca account.
+                is charged by Obsidian Capital on all trades. This is separate from your IBKR account fees.
               </p>
             </div>
           )}

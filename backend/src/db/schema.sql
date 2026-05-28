@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
   tier                   VARCHAR(20) NOT NULL DEFAULT 'standard'
                            CHECK (tier IN ('standard', 'member', 'private')),
 
-  -- KYC verification status
+  -- KYC verification status (driven by Stripe Identity)
   kyc_status             VARCHAR(20) NOT NULL DEFAULT 'pending'
                            CHECK (kyc_status IN ('pending', 'approved', 'rejected', 'under_review')),
 
@@ -248,14 +248,18 @@ VALUES
 ON CONFLICT (email) DO NOTHING;
 
 -- ============================================================
--- Obsidian Capital — Alpaca, Stripe, and Commission Tables
--- (appended by upgrade — safe to run on existing DB)
+-- Obsidian Capital — Interactive Brokers, Stripe, and Commission Tables
+-- (safe to run on existing DB — uses IF NOT EXISTS / DO UPDATE)
 -- ============================================================
 
 -- ─── EXTEND USERS TABLE ───────────────────────────────────────────────────────
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS alpaca_connected    BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ibkr_connected      BOOLEAN DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ibkr_account_id     VARCHAR(50);
+
+-- Drop old alpaca column if it still exists (idempotent migration)
+ALTER TABLE users DROP COLUMN IF EXISTS alpaca_connected;
 
 -- ─── COMMISSIONS ─────────────────────────────────────────────────────────────
 -- One record per trade execution; tracks commission billing lifecycle.
@@ -314,21 +318,43 @@ CREATE TABLE IF NOT EXISTS price_alerts (
 CREATE INDEX IF NOT EXISTS idx_price_alerts_user_id ON price_alerts(user_id);
 CREATE INDEX IF NOT EXISTS idx_price_alerts_ticker  ON price_alerts(ticker);
 
--- ─── ALPACA CONNECTIONS ───────────────────────────────────────────────────────
--- Stores per-user Alpaca OAuth tokens for proxying trade execution.
+-- ─── IBKR CONNECTIONS ─────────────────────────────────────────────────────────
+-- Stores per-user Interactive Brokers OAuth tokens for proxying trade execution.
 
-CREATE TABLE IF NOT EXISTS alpaca_connections (
+CREATE TABLE IF NOT EXISTS ibkr_connections (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id           UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
   access_token      TEXT NOT NULL,
   refresh_token     TEXT,
-  paper_mode        BOOLEAN DEFAULT TRUE,
-  alpaca_account_id VARCHAR(255),
+  account_id        VARCHAR(50),
+  account_type      VARCHAR(50),
+  paper_mode        BOOLEAN DEFAULT FALSE,
+  token_expires_at  TIMESTAMP WITH TIME ZONE,
   connected_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_ibkr_connections_user_id ON ibkr_connections(user_id);
+
+-- ─── KYC SESSIONS ─────────────────────────────────────────────────────────────
+-- Tracks Stripe Identity verification sessions per user.
+
+CREATE TABLE IF NOT EXISTS kyc_sessions (
+  id                              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                         UUID REFERENCES users(id) ON DELETE CASCADE,
+  stripe_verification_session_id  VARCHAR(255) UNIQUE,
+  status                          VARCHAR(30) DEFAULT 'pending',
+  created_at                      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  verified_at                     TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_kyc_sessions_user_id    ON kyc_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_kyc_sessions_session_id ON kyc_sessions(stripe_verification_session_id);
 
 -- ─── ADDITIONAL INDEXES ───────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_users_stripe_customer_id ON users(stripe_customer_id)
   WHERE stripe_customer_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_users_ibkr_account_id ON users(ibkr_account_id)
+  WHERE ibkr_account_id IS NOT NULL;

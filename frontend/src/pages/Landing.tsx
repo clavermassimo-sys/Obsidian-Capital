@@ -576,13 +576,13 @@ function AboutSection() {
 const LEADERS = [
   {
     firstName: 'Massimo',
-    lastName: 'Claver-Carone',
+    lastName: 'Claver',
     role: 'CEO & Founder',
     quote: 'Building the future of elite trading.',
   },
   {
     firstName: 'Marco',
-    lastName: 'Torterelli',
+    lastName: 'Tortorelli',
     role: 'CTO',
     quote: 'Technology-first approach to brokerage.',
   },
@@ -744,9 +744,10 @@ function Footer() {
         <div className="space-y-3 text-xs text-off-white/25 leading-relaxed max-w-4xl">
           <p>
             Securities trading is provided through{' '}
-            <strong className="text-off-white/35">Alpaca Securities LLC</strong>, member FINRA/SIPC.
-            Obsidian Capital is not a broker-dealer and does not hold client funds. All brokerage services,
-            including order execution and account custody, are provided exclusively by Alpaca Securities LLC.
+            <strong className="text-off-white/35">Interactive Brokers LLC</strong>, member FINRA/SIPC.
+            Obsidian Capital is an introducing broker. All funds held at Interactive Brokers. All brokerage
+            services, including order execution and account custody, are provided exclusively by Interactive
+            Brokers LLC.
           </p>
           <p>
             <strong className="text-off-white/35">SIPC Protection Notice:</strong> Securities held in accounts

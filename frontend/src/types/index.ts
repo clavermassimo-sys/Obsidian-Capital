@@ -275,11 +275,12 @@ export interface Notification {
   createdAt: string;
 }
 
-// ── Alpaca ────────────────────────────────────────────────────
+// ── Interactive Brokers ───────────────────────────────────────
 
-export interface AlpacaAccount {
+export interface IBKRAccount {
   id: string;
-  accountNumber: string;
+  /** IBKR account ID (e.g. U1234567) */
+  accountId: string;
   status: string;
   currency: string;
   buyingPower: number;
@@ -292,6 +293,9 @@ export interface AlpacaAccount {
   tradingBlocked: boolean;
   paperMode: boolean;
 }
+
+/** @deprecated Use IBKRAccount */
+export type AlpacaAccount = IBKRAccount;
 
 // ── Subscription / Billing ────────────────────────────────────
 

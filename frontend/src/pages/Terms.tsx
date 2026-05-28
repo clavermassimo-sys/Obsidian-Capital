@@ -56,7 +56,7 @@ export default function Terms() {
               '2. Service Description',
               '3. Commission Fees',
               '4. Risk Disclosure',
-              '5. Alpaca Securities',
+              '5. Interactive Brokers',
               '6. SIPC Protection',
               '7. Account Eligibility',
               '8. Prohibited Activities',
@@ -100,13 +100,14 @@ export default function Terms() {
         <Section title="2. Service Description">
           <p>
             Obsidian Capital is a trading interface and investment technology platform that connects
-            to Alpaca Securities LLC for order execution. We provide users with access to market
-            data, portfolio analytics, a trading dashboard, and related financial tools.
+            to Interactive Brokers LLC for order execution. We provide users with access to market
+            data, portfolio analytics, a trading dashboard, and related financial tools. Obsidian
+            Capital operates as an introducing broker through Interactive Brokers LLC.
           </p>
           <p>
             <strong className="text-off-white/80">Obsidian Capital is not a registered broker-dealer.</strong>{' '}
             We do not hold client funds or custody securities. All brokerage services — including
-            order routing, execution, and custody — are provided exclusively by Alpaca Securities
+            order routing, execution, and custody — are provided exclusively by Interactive Brokers
             LLC, a registered broker-dealer and member of FINRA/SIPC.
           </p>
           <p>
@@ -185,28 +186,28 @@ export default function Terms() {
           </p>
         </Section>
 
-        <Section title="5. Alpaca Securities">
+        <Section title="5. Interactive Brokers">
           <p>
             All brokerage services provided through the Platform are executed by{' '}
-            <strong className="text-off-white/80">Alpaca Securities LLC</strong>, a registered
-            broker-dealer, member FINRA/SIPC. Alpaca Securities is not affiliated with Obsidian
+            <strong className="text-off-white/80">Interactive Brokers LLC</strong>, a registered
+            broker-dealer, member FINRA/SIPC. Interactive Brokers LLC is not affiliated with Obsidian
             Capital.
           </p>
           <p>
-            By opening an account through Obsidian Capital, you agree to Alpaca Securities' Customer
-            Agreement, which governs the brokerage relationship between you and Alpaca Securities.
-            Obsidian Capital is not a party to the Alpaca Securities Customer Agreement.
+            By opening an account through Obsidian Capital, you agree to Interactive Brokers' Customer
+            Agreement, which governs the brokerage relationship between you and Interactive Brokers LLC.
+            Obsidian Capital is not a party to the Interactive Brokers Customer Agreement.
           </p>
           <p>
-            Alpaca Securities is responsible for order execution, account custody, margin
+            Interactive Brokers LLC is responsible for order execution, account custody, margin
             calculations, and regulatory compliance related to brokerage activities. Any disputes
-            regarding order execution or custody should be directed to Alpaca Securities.
+            regarding order execution or custody should be directed to Interactive Brokers LLC.
           </p>
         </Section>
 
         <Section title="6. SIPC Protection">
           <p>
-            Securities held in accounts through Alpaca Securities are protected by the{' '}
+            Securities held in accounts through Interactive Brokers LLC are protected by the{' '}
             <strong className="text-off-white/80">
               Securities Investor Protection Corporation (SIPC)
             </strong>{' '}
@@ -215,7 +216,7 @@ export default function Terms() {
             does not protect against market losses or investment risk.
           </p>
           <p>
-            SIPC protection is provided through Alpaca Securities' membership in SIPC. Obsidian
+            SIPC protection is provided through Interactive Brokers' membership in SIPC. Obsidian
             Capital is not a member of SIPC. For more information about SIPC protection, visit{' '}
             <a
               href="https://www.sipc.org"
@@ -275,7 +276,7 @@ export default function Terms() {
             <li>Platform downtime or technical failures</li>
             <li>Errors in market data or analytics</li>
             <li>Unauthorized access to your account</li>
-            <li>Actions or omissions of third-party service providers, including Alpaca Securities</li>
+            <li>Actions or omissions of third-party service providers, including Interactive Brokers LLC</li>
           </ul>
           <p>
             Our total cumulative liability for any claims shall not exceed the greater of (a) the

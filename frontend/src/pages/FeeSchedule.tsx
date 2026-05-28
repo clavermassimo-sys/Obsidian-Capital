@@ -445,7 +445,7 @@ export default function FeeSchedule() {
             REGULATORY DISCLOSURES
           </p>
           <p className="text-xs text-off-white/30 font-sans leading-relaxed">
-            Trading provided by Alpaca Securities LLC, member FINRA/SIPC. Obsidian Capital is not a
+            Trading provided by Interactive Brokers LLC, member FINRA/SIPC. Obsidian Capital is not a
             registered broker-dealer. Commissions charged by Obsidian Capital are platform fees
             separate from any exchange or regulatory fees. Commission rates shown are estimates;
             actual rates may vary based on order type, market conditions, and account tier. All

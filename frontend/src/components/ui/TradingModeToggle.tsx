@@ -2,7 +2,7 @@
    Obsidian Capital — TradingModeToggle
    Paper / Live mode toggle. Shown in Navbar and TradePanel.
    Switching to LIVE shows a confirmation modal.
-   Mode persisted to localStorage as 'alpaca_mode'.
+   Mode persisted to localStorage as 'ibkr_mode'.
    ============================================================ */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -13,7 +13,7 @@ import { FlaskConical, Zap, AlertTriangle, X } from 'lucide-react';
 
 export type TradingMode = 'paper' | 'live';
 
-const STORAGE_KEY = 'alpaca_mode';
+const STORAGE_KEY = 'ibkr_mode';
 
 // ── Hook ──────────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ function LiveWarningModal({ onConfirm, onCancel }: LiveWarningModalProps) {
             <p className="text-sm text-off-white/60 leading-relaxed mb-1">
               Live trading uses{' '}
               <strong className="text-off-white/80">real money</strong> from your connected
-              Alpaca account. Orders placed in Live mode will be executed on real markets.
+              Interactive Brokers account. Orders placed in Live mode will be executed on real markets.
             </p>
             <p className="text-sm text-off-white/50 leading-relaxed mb-6">
               Are you sure you want to switch from Paper to Live mode?
@@ -152,7 +152,7 @@ function LiveWarningModal({ onConfirm, onCancel }: LiveWarningModalProps) {
 
             {/* Fine print */}
             <p className="mt-4 text-2xs text-off-white/25 text-center leading-relaxed">
-              Trading executed by Alpaca Securities LLC, member FINRA/SIPC.
+              Trading executed by Interactive Brokers LLC, member FINRA/SIPC.
               You can switch back to Paper mode at any time.
             </p>
           </div>

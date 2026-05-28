@@ -110,7 +110,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         setHoldings(res.holdings.map(rawToHolding));
       }
     }).catch(() => {
-      // If API fails (unauthenticated/no Alpaca key), leave empty
+      // If API fails (unauthenticated/no IBKR connection), leave empty
     });
   }, []);
 
