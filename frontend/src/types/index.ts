@@ -270,3 +270,89 @@ export interface Notification {
   read: boolean;
   createdAt: string;
 }
+
+// ── Alpaca ────────────────────────────────────────────────────
+
+export interface AlpacaAccount {
+  id: string;
+  accountNumber: string;
+  status: string;
+  currency: string;
+  buyingPower: number;
+  cash: number;
+  portfolioValue: number;
+  equity: number;
+  lastEquity: number;
+  longMarketValue: number;
+  patternDayTrader: boolean;
+  tradingBlocked: boolean;
+  paperMode: boolean;
+}
+
+// ── Subscription / Billing ────────────────────────────────────
+
+export interface Subscription {
+  tier: 'standard' | 'member' | 'private';
+  status: 'active' | 'cancelled' | 'past_due' | 'trialing';
+  currentPeriodEnd?: string;
+  trialEnd?: string;
+  stripeSubscriptionId?: string;
+  /** Monthly amount in dollars */
+  monthlyAmount?: number;
+}
+
+export interface CommissionRecord {
+  id: string;
+  tradeId: string;
+  ticker: string;
+  tradeValue: number;
+  commissionRate: number;
+  commissionAmount: number;
+  paymentStatus: 'pending' | 'charged' | 'failed' | 'waived';
+  createdAt: string;
+}
+
+// ── Extended Order Types ──────────────────────────────────────
+
+export type ExtendedOrderType = 'market' | 'limit' | 'stop' | 'stop_limit' | 'trailing_stop';
+export type TimeInForce = 'day' | 'gtc' | 'ioc' | 'fok';
+
+export interface ExtendedOrderRequest {
+  ticker: string;
+  side: 'buy' | 'sell';
+  qty?: number;
+  /** Dollar amount for fractional shares */
+  notional?: number;
+  orderType: ExtendedOrderType;
+  timeInForce?: TimeInForce;
+  limitPrice?: number;
+  stopPrice?: number;
+  trailPercent?: number;
+}
+
+export interface CommissionSavings {
+  vs_standard: number;
+  upgrade_to_member: number;
+  upgrade_to_private: number;
+}
+
+export interface ExtendedCommissionBreakdown {
+  subtotal: number;
+  rate: number;
+  rateDisplay: string;
+  amount: number;
+  total: number;
+  tier: CommissionTier;
+  savings: CommissionSavings;
+}
+
+export interface PriceAlert {
+  id: string;
+  ticker: string;
+  companyName: string;
+  targetPrice: number;
+  direction: 'above' | 'below';
+  isActive: boolean;
+  triggeredAt?: string;
+  createdAt: string;
+}

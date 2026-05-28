@@ -20,10 +20,9 @@ interface AppLayoutProps {
   /** Optional override: pass a custom trade panel node,
    *  or leave undefined to hide it */
   tradePanel?: React.ReactNode;
-  children?: React.ReactNode;
 }
 
-export default function AppLayout({ tradePanel, children }: AppLayoutProps) {
+export default function AppLayout({ tradePanel }: AppLayoutProps) {
   return (
     <div
       className="flex flex-col min-h-screen w-full bg-obsidian"
@@ -60,7 +59,7 @@ export default function AppLayout({ tradePanel, children }: AppLayoutProps) {
         >
           {/* Page scroll container */}
           <div className="min-h-full">
-            {children ?? <Outlet />}
+            <Outlet />
           </div>
         </main>
 
