@@ -24,11 +24,12 @@ import {
 import type { CommissionTier, OrderSide, ExtendedOrderType, TimeInForce } from '@/types';
 import { useTrading } from '@/contexts/TradingContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { marketApi } from '@/services/api';
 import { CommissionCalculator } from './CommissionCalculator';
 import { OrderConfirmModal } from './OrderConfirmModal';
 import { AlpacaConnectBanner } from '@/components/ui/AlpacaConnectBanner';
 
-// ── Mock Stock Data ───────────────────────────────────────────
+// ── Stock Info (populated from real API) ──────────────────────
 
 interface StockInfo {
   ticker: string;
@@ -38,43 +39,14 @@ interface StockInfo {
   ask: number;
   change: number;
   changePct: number;
-  dayLow: number;
-  dayHigh: number;
+  high52: number;
+  low52: number;
 }
 
-const MOCK_STOCKS: StockInfo[] = [
-  { ticker: 'AAPL',  companyName: 'Apple Inc.',           price: 189.84, bid: 189.81, ask: 189.87, change:  2.14, changePct:  1.14, dayLow: 187.32, dayHigh: 190.54 },
-  { ticker: 'MSFT',  companyName: 'Microsoft Corp.',      price: 418.32, bid: 418.28, ask: 418.36, change:  5.88, changePct:  1.43, dayLow: 412.10, dayHigh: 419.80 },
-  { ticker: 'NVDA',  companyName: 'NVIDIA Corp.',         price: 875.40, bid: 875.20, ask: 875.60, change: 22.10, changePct:  2.59, dayLow: 851.00, dayHigh: 878.90 },
-  { ticker: 'AMZN',  companyName: 'Amazon.com Inc.',      price: 198.72, bid: 198.68, ask: 198.76, change: -1.44, changePct: -0.72, dayLow: 196.50, dayHigh: 200.42 },
-  { ticker: 'GOOGL', companyName: 'Alphabet Inc.',        price: 171.96, bid: 171.92, ask: 172.00, change:  1.08, changePct:  0.63, dayLow: 170.12, dayHigh: 172.88 },
-  { ticker: 'META',  companyName: 'Meta Platforms',       price: 571.28, bid: 571.20, ask: 571.36, change: -4.12, changePct: -0.72, dayLow: 566.00, dayHigh: 575.90 },
-  { ticker: 'TSLA',  companyName: 'Tesla Inc.',           price: 248.42, bid: 248.36, ask: 248.48, change:  8.32, changePct:  3.46, dayLow: 239.80, dayHigh: 250.10 },
-  { ticker: 'JPM',   companyName: 'JPMorgan Chase',       price: 224.58, bid: 224.54, ask: 224.62, change:  1.24, changePct:  0.55, dayLow: 222.40, dayHigh: 225.70 },
-  { ticker: 'V',     companyName: 'Visa Inc.',            price: 289.34, bid: 289.28, ask: 289.40, change: -0.88, changePct: -0.30, dayLow: 287.60, dayHigh: 290.80 },
-  { ticker: 'BRK.B', companyName: 'Berkshire Hathaway B', price: 452.80, bid: 452.70, ask: 452.90, change:  2.08, changePct:  0.46, dayLow: 449.20, dayHigh: 454.30 },
-  { ticker: 'GLD',   companyName: 'SPDR Gold Trust ETF',  price: 238.40, bid: 238.34, ask: 238.46, change:  1.84, changePct:  0.78, dayLow: 236.50, dayHigh: 239.60 },
-  { ticker: 'SPY',   companyName: 'SPDR S&P 500 ETF',    price: 531.20, bid: 531.14, ask: 531.26, change:  3.44, changePct:  0.65, dayLow: 527.30, dayHigh: 532.80 },
-  { ticker: 'QQQ',   companyName: 'Invesco QQQ Trust',   price: 468.12, bid: 468.04, ask: 468.20, change:  6.28, changePct:  1.36, dayLow: 461.40, dayHigh: 469.50 },
-  { ticker: 'BRK.A', companyName: 'Berkshire Hathaway A', price: 677400.0, bid: 677200.0, ask: 677600.0, change: 2400.0, changePct: 0.36, dayLow: 673000, dayHigh: 679000 },
-  { ticker: 'UNH',   companyName: 'UnitedHealth Group',  price: 318.50, bid: 318.44, ask: 318.56, change: -2.80, changePct: -0.87, dayLow: 315.20, dayHigh: 321.80 },
-  { ticker: 'XOM',   companyName: 'Exxon Mobil Corp.',   price: 114.62, bid: 114.58, ask: 114.66, change:  0.98, changePct:  0.86, dayLow: 113.20, dayHigh: 115.40 },
-  { ticker: 'LLY',   companyName: 'Eli Lilly and Co.',   price: 889.20, bid: 889.00, ask: 889.40, change: 12.40, changePct:  1.41, dayLow: 875.00, dayHigh: 892.60 },
-  { ticker: 'WMT',   companyName: 'Walmart Inc.',        price:  93.48, bid:  93.44, ask:  93.52, change:  0.56, changePct:  0.60, dayLow:  92.60, dayHigh:  94.10 },
-];
-
-function findStock(ticker: string): StockInfo | undefined {
-  return MOCK_STOCKS.find((s) => s.ticker.toUpperCase() === ticker.toUpperCase());
-}
-
-function searchStocks(query: string): StockInfo[] {
-  if (!query.trim()) return [];
-  const q = query.toLowerCase();
-  return MOCK_STOCKS.filter(
-    (s) =>
-      s.ticker.toLowerCase().includes(q) ||
-      s.companyName.toLowerCase().includes(q)
-  ).slice(0, 6);
+interface SearchResult {
+  symbol: string;
+  name: string;
+  type: string;
 }
 
 // ── Formatters ────────────────────────────────────────────────
@@ -119,9 +91,11 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
   // ── Local State ───────────────────────────────────────────
 
   const [searchQuery, setSearchQuery]     = useState('');
-  const [searchResults, setSearchResults] = useState<StockInfo[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [showDropdown, setShowDropdown]   = useState(false);
   const [activeStock, setActiveStock]     = useState<StockInfo | null>(null);
+  const [quoteLoading, setQuoteLoading]   = useState(false);
 
   const [side, setSide]                             = useState<OrderSide>('buy');
   const [orderType, setOrderType]                   = useState<ExtendedOrderType>('market');
@@ -139,18 +113,30 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
 
   const searchRef = useRef<HTMLDivElement>(null);
 
-  // ── Sync selectedTicker from context ─────────────────────
+  // ── Sync selectedTicker from context → fetch real quote ──
 
   useEffect(() => {
-    if (selectedTicker) {
-      const stock = findStock(selectedTicker);
-      if (stock) {
-        setActiveStock(stock);
-        setSearchQuery('');
-        setShowDropdown(false);
+    if (!selectedTicker) return;
+    setQuoteLoading(true);
+    setSearchQuery('');
+    setShowDropdown(false);
+    marketApi.getQuote(selectedTicker)
+      .then((q) => {
+        setActiveStock({
+          ticker: q.symbol,
+          companyName: q.symbol,
+          price: q.price,
+          bid: q.bid,
+          ask: q.ask,
+          change: q.change,
+          changePct: q.changePct,
+          high52: q.high52,
+          low52: q.low52,
+        });
         resetForm();
-      }
-    }
+      })
+      .catch(() => setActiveStock(null))
+      .finally(() => setQuoteLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTicker]);
 
@@ -164,18 +150,24 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
     setSuccessTrade(null);
   }
 
-  // ── Debounced search ──────────────────────────────────────
+  // ── Debounced real search via backend ────────────────────
 
   useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
     const t = setTimeout(() => {
-      if (searchQuery.trim()) {
-        setSearchResults(searchStocks(searchQuery));
-        setShowDropdown(true);
-      } else {
-        setSearchResults([]);
-        setShowDropdown(false);
-      }
-    }, 150);
+      setSearchLoading(true);
+      marketApi.searchAssets(searchQuery)
+        .then((res) => {
+          setSearchResults(res.assets.slice(0, 6));
+          setShowDropdown(true);
+        })
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearchLoading(false));
+    }, 300);
     return () => clearTimeout(t);
   }, [searchQuery]);
 
@@ -210,12 +202,28 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
 
   // ── Select stock ──────────────────────────────────────────
 
-  function selectStock(stock: StockInfo) {
-    setActiveStock(stock);
-    setSelectedTicker(stock.ticker);
-    setSearchQuery('');
+  function selectStock(result: SearchResult) {
     setShowDropdown(false);
+    setSearchQuery('');
+    setSelectedTicker(result.symbol);
+    setQuoteLoading(true);
     resetForm();
+    marketApi.getQuote(result.symbol)
+      .then((q) => {
+        setActiveStock({
+          ticker: q.symbol,
+          companyName: result.name,
+          price: q.price,
+          bid: q.bid,
+          ask: q.ask,
+          change: q.change,
+          changePct: q.changePct,
+          high52: q.high52,
+          low52: q.low52,
+        });
+      })
+      .catch(() => setActiveStock(null))
+      .finally(() => setQuoteLoading(false));
   }
 
   // ── Compute order request ─────────────────────────────────
@@ -305,33 +313,38 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
               />
             </div>
 
-            {showDropdown && searchResults.length > 0 && (
+            {showDropdown && (searchLoading || searchResults.length > 0) && (
               <div className="absolute top-full left-0 right-0 mt-1 rounded-lg border border-border bg-surface-2 shadow-surface-lg z-20 overflow-hidden">
-                {searchResults.map((stock) => (
-                  <button
-                    key={stock.ticker}
-                    onClick={() => selectStock(stock)}
-                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-surface-3 transition-colors text-left"
-                  >
-                    <div>
-                      <p className="text-sm font-mono font-semibold text-off-white">{stock.ticker}</p>
-                      <p className="text-xs font-sans text-[#a09a8e] truncate max-w-[160px]">{stock.companyName}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-mono text-off-white">{fmt(stock.price)}</p>
-                      <p className="text-xs font-sans" style={{ color: stock.change >= 0 ? '#3d9e6e' : '#c0453a' }}>
-                        {stock.change >= 0 ? '+' : ''}{stock.changePct.toFixed(2)}%
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                {searchLoading ? (
+                  <div className="px-3 py-3 text-xs text-[#a09a8e] font-sans">Searching…</div>
+                ) : (
+                  searchResults.map((result) => (
+                    <button
+                      key={result.symbol}
+                      onClick={() => selectStock(result)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-surface-3 transition-colors text-left"
+                    >
+                      <div>
+                        <p className="text-sm font-mono font-semibold text-off-white">{result.symbol}</p>
+                        <p className="text-xs font-sans text-[#a09a8e] truncate max-w-[200px]">{result.name}</p>
+                      </div>
+                      <span className="text-xs font-sans text-[#6b6560] uppercase">{result.type}</span>
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>
 
           {/* ── Selected Stock Info ───────────────────────────── */}
+          {quoteLoading && (
+            <div className="rounded-lg border border-border bg-surface-2 p-3 space-y-2 animate-pulse">
+              <div className="h-4 w-24 rounded bg-surface-3" />
+              <div className="h-7 w-32 rounded bg-surface-3" />
+            </div>
+          )}
           <AnimatePresence mode="wait">
-            {activeStock ? (
+            {!quoteLoading && activeStock ? (
               <motion.div
                 key={activeStock.ticker}
                 initial={{ opacity: 0, y: -4 }}
@@ -366,12 +379,12 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
                     <span className="text-xs font-mono text-[#a09a8e]">{fmt(activeStock.ask)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-2xs text-[#6b6560]">Day Low</span>
-                    <span className="text-xs font-mono text-[#a09a8e]">{fmt(activeStock.dayLow)}</span>
+                    <span className="text-2xs text-[#6b6560]">52w Low</span>
+                    <span className="text-xs font-mono text-[#a09a8e]">{fmt(activeStock.low52)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-2xs text-[#6b6560]">Day High</span>
-                    <span className="text-xs font-mono text-[#a09a8e]">{fmt(activeStock.dayHigh)}</span>
+                    <span className="text-2xs text-[#6b6560]">52w High</span>
+                    <span className="text-xs font-mono text-[#a09a8e]">{fmt(activeStock.high52)}</span>
                   </div>
                 </div>
               </motion.div>
