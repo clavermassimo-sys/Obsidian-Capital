@@ -33,6 +33,10 @@ export interface User {
   avatarUrl?: string;
   /** Phone number (E.164 format) */
   phone?: string;
+  /** Whether the user has a linked Interactive Brokers account */
+  ibkrConnected?: boolean;
+  /** IBKR account ID (e.g. U1234567) */
+  ibkrAccountId?: string;
 }
 
 export interface AuthTokens {

@@ -11,7 +11,7 @@ import React, {
   ReactNode,
 } from 'react';
 import type { User, LoginCredentials, Subscription } from '@/types/index';
-import { alpacaOAuth } from '@/services/alpaca';
+import { ibkrOAuth } from '@/services/ibkr';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -20,13 +20,19 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
+  ibkrConnected: boolean;
+  /** @deprecated Use ibkrConnected */
   alpacaConnected: boolean;
   subscription: Subscription | null;
   login: (credentials: LoginCredentials & { twoFactorCode?: string }) => Promise<{ requires2FA: boolean }>;
   logout: () => void;
   register: (payload: RegisterPayload) => Promise<void>;
   clearError: () => void;
+  connectIBKR: (paperMode?: boolean) => void;
+  disconnectIBKR: () => Promise<void>;
+  /** @deprecated Use connectIBKR */
   connectAlpaca: (paperMode?: boolean) => void;
+  /** @deprecated Use disconnectIBKR */
   disconnectAlpaca: () => Promise<void>;
   upgradeTier: (tier: 'member' | 'private') => Promise<void>;
 }
@@ -54,6 +60,7 @@ const MOCK_USER: User = {
   kycStatus: 'approved',
   buyingPower: 250000,
   portfolioValue: 1_843_200,
+  ibkrConnected: false,
   createdAt: '2026-01-15T00:00:00Z',
 };
 
@@ -72,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [alpacaConnected, setAlpacaConnected] = useState(false);
+  const [ibkrConnected, setIbkrConnected] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
 
   // Restore session on mount
@@ -82,9 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const parsed = JSON.parse(stored);
         setUser(parsed);
-        // Restore Alpaca connection status
-        const alpacaMode = localStorage.getItem('alpaca_connected');
-        if (alpacaMode === 'true') setAlpacaConnected(true);
+        // Restore IBKR connection status
+        const ibkrMode = localStorage.getItem('ibkr_connected');
+        if (ibkrMode === 'true') setIbkrConnected(true);
         // Mock subscription based on tier
         setSubscription({ ...MOCK_SUBSCRIPTION, tier: parsed.tier ?? 'standard' });
       } catch {
@@ -127,9 +134,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem('oc_user', JSON.stringify(loggedInUser));
         setSubscription({ ...MOCK_SUBSCRIPTION, tier: loggedInUser.tier });
 
-        // Restore Alpaca status
-        const alpacaMode = localStorage.getItem('alpaca_connected');
-        if (alpacaMode === 'true') setAlpacaConnected(true);
+        // Restore IBKR status
+        const ibkrMode = localStorage.getItem('ibkr_connected');
+        if (ibkrMode === 'true') setIbkrConnected(true);
 
         return { requires2FA: false };
       } catch (err) {
@@ -147,7 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setUser(null);
-    setAlpacaConnected(false);
+    setIbkrConnected(false);
     setSubscription(null);
     localStorage.removeItem('oc_user');
   }, []);
@@ -170,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         kycStatus: 'pending',
         buyingPower: 0,
         portfolioValue: 0,
+        ibkrConnected: false,
         createdAt: new Date().toISOString(),
       };
       setUser(newUser);
@@ -188,25 +196,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Alpaca OAuth ──────────────────────────────────────────
+  // ── IBKR OAuth ────────────────────────────────────────────
 
   /**
-   * Redirect user to Alpaca OAuth to connect their account.
+   * Redirect user to IBKR OAuth to connect their account.
    * @param paperMode - true = paper trading, false = live (default true)
    */
-  const connectAlpaca = useCallback((paperMode: boolean = true) => {
-    const clientId = import.meta.env.VITE_ALPACA_CLIENT_ID || '';
-    const redirectUri = `${window.location.origin}/settings/alpaca-callback`;
-    const authUrl = alpacaOAuth.getAuthUrl(clientId, redirectUri, paperMode);
+  const connectIBKR = useCallback((paperMode: boolean = true) => {
+    const authUrl = ibkrOAuth.getAuthUrl(paperMode);
     window.location.href = authUrl;
   }, []);
 
   /**
-   * Disconnect Alpaca account by removing stored tokens (via backend).
+   * Disconnect IBKR account by removing stored tokens (via backend).
    */
-  const disconnectAlpaca = useCallback(async () => {
+  const disconnectIBKR = useCallback(async () => {
     try {
-      await fetch('/api/trades/alpaca/disconnect', {
+      await fetch('/api/trades/ibkr/disconnect', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -218,8 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Best-effort disconnect
     } finally {
-      setAlpacaConnected(false);
-      localStorage.removeItem('alpaca_connected');
+      setIbkrConnected(false);
+      localStorage.removeItem('ibkr_connected');
     }
   }, []);
 
@@ -267,14 +273,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         error,
-        alpacaConnected,
+        ibkrConnected,
+        alpacaConnected: ibkrConnected, // backwards compatibility alias
         subscription,
         login,
         logout,
         register,
         clearError,
-        connectAlpaca,
-        disconnectAlpaca,
+        connectIBKR,
+        disconnectIBKR,
+        connectAlpaca: connectIBKR,    // backwards compatibility alias
+        disconnectAlpaca: disconnectIBKR, // backwards compatibility alias
         upgradeTier,
       }}
     >
