@@ -6,7 +6,6 @@ import { tradeLimiter } from '../middleware/rateLimit';
 import { alpacaService, AlpacaService } from '../services/alpaca';
 import { stripeService } from '../services/stripe';
 import { getCommissionBreakdown } from '../middleware/commission';
-import { COMMISSION_CONFIG } from '../config/commission';
 import { query, transaction } from '../config/database';
 
 const router = Router();

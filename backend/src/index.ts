@@ -371,8 +371,13 @@ httpServer.listen(PORT, () => {
   console.log(`│    POST /api/auth/register                       │`);
   console.log(`│    POST /api/auth/login                          │`);
   console.log(`│    GET  /api/portfolio/holdings                  │`);
-  console.log(`│    POST /api/trades/order                        │`);
-  console.log(`│    GET  /api/market/quote/:ticker                │`);
+  console.log(`│    POST /api/trades/order          [Alpaca]      │`);
+  console.log(`│    GET  /api/trades/positions      [Alpaca]      │`);
+  console.log(`│    GET  /api/market/quote/:ticker  [Alpaca]      │`);
+  console.log(`│    GET  /api/market/crypto         [CoinGecko]   │`);
+  console.log(`│    GET  /api/subscriptions/status  [Stripe]      │`);
+  console.log(`│    POST /api/subscriptions/upgrade [Stripe]      │`);
+  console.log(`│    POST /webhooks/stripe           [Stripe WH]   │`);
   console.log(`│    GET  /api/admin/stats                         │`);
   console.log(`│  WebSocket: ws://localhost:${PORT}                  │`);
   console.log(`└─────────────────────────────────────────────────┘\n`);
