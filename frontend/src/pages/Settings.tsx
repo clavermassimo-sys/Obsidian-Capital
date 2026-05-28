@@ -31,7 +31,7 @@ import {
   DollarSign,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import AppLayout, { PageContent, PageHeader } from '@/components/layout/AppLayout';
+import { PageContent, PageHeader } from '@/components/layout/AppLayout';
 
 // ── Shared Styles ─────────────────────────────────────────────
 

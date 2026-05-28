@@ -1,8 +1,10 @@
 /* ============================================================
    Obsidian Capital — Markets Page
+   Real data from Polygon.io via /api/market/* endpoints.
    ============================================================ */
 
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   TrendingUp,
   TrendingDown,
@@ -11,101 +13,14 @@ import {
   ExternalLink,
   BarChart2,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { useTrading } from '@/contexts/TradingContext';
-import { formatCurrency, formatNumber, formatRelativeTime } from '@/utils/format';
+import { marketApi } from '@/services/api';
+import type { IndexQuote, MoverEntry, NewsItem } from '@/services/api';
+import { formatCurrency, formatRelativeTime } from '@/utils/format';
 
-// ── Mock Data ─────────────────────────────────────────────────
-
-const INDICES = [
-  { name: 'S&P 500',      symbol: 'SPX',   value: 5847.28,  change: 47.53,   changePct: 0.82  },
-  { name: 'Nasdaq',       symbol: 'IXIC',  value: 18934.71, change: 231.84,  changePct: 1.24  },
-  { name: 'Dow Jones',    symbol: 'DJI',   value: 42134.56, change: 180.22,  changePct: 0.43  },
-  { name: 'Russell 2000', symbol: 'RUT',   value: 2187.43,  change: -6.83,   changePct: -0.31 },
-];
-
-const TOP_GAINERS = [
-  { ticker: 'NVDA', name: 'NVIDIA Corp.',         price: 912.40,  changePct: 8.43  },
-  { ticker: 'SMCI', name: 'Super Micro Computer', price: 847.12,  changePct: 7.21  },
-  { ticker: 'PLTR', name: 'Palantir Technologies', price: 34.82,  changePct: 6.88  },
-  { ticker: 'CRWD', name: 'CrowdStrike Holdings',  price: 368.54, changePct: 5.94  },
-  { ticker: 'MSTR', name: 'MicroStrategy Inc.',    price: 1243.80,changePct: 5.31  },
-];
-
-const TOP_LOSERS = [
-  { ticker: 'INTC', name: 'Intel Corporation',     price: 19.34,  changePct: -4.82 },
-  { ticker: 'PFE',  name: 'Pfizer Inc.',            price: 24.87,  changePct: -3.94 },
-  { ticker: 'BA',   name: 'Boeing Co.',             price: 172.43, changePct: -3.41 },
-  { ticker: 'WBA',  name: 'Walgreens Boots Alliance',price: 11.24, changePct: -3.02 },
-  { ticker: 'MPW',  name: 'Medical Properties Trust',price: 4.92,  changePct: -2.74 },
-];
-
-const SECTORS = [
-  { name: 'Technology',          changePct: 1.84  },
-  { name: 'Healthcare',          changePct: -0.43 },
-  { name: 'Financials',          changePct: 0.71  },
-  { name: 'Energy',              changePct: -1.22 },
-  { name: 'Consumer Disc.',      changePct: 0.94  },
-  { name: 'Consumer Staples',    changePct: 0.18  },
-  { name: 'Industrials',         changePct: 0.53  },
-  { name: 'Materials',           changePct: -0.67 },
-  { name: 'Real Estate',         changePct: -0.84 },
-  { name: 'Utilities',           changePct: 0.29  },
-  { name: 'Communication Svcs.', changePct: 1.12  },
-];
-
-const NEWS = [
-  {
-    id: 1,
-    headline: 'Federal Reserve Signals Potential Rate Cut in Q3 2026 Amid Cooling Inflation Data',
-    source: 'Reuters',
-    timestamp: new Date(Date.now() - 28 * 60 * 1000).toISOString(),
-    description: 'Fed Chair indicated the committee is watching inflation metrics closely, with a 25bps cut increasingly likely at the September meeting following CPI data coming in below estimates for the third consecutive month.',
-    tag: 'Macro',
-  },
-  {
-    id: 2,
-    headline: 'NVIDIA Reports Record Q1 Revenue of $28.4B, Beats Wall Street Estimates by 12%',
-    source: 'Bloomberg',
-    timestamp: new Date(Date.now() - 1.5 * 60 * 60 * 1000).toISOString(),
-    description: 'Data center segment drove the bulk of revenue at $22.6B as hyperscaler AI infrastructure buildout continues to accelerate. Full-year guidance raised to $112B–$118B.',
-    tag: 'Earnings',
-  },
-  {
-    id: 3,
-    headline: 'S&P 500 Reaches New All-Time High as Tech Stocks Lead Broad-Based Rally',
-    source: 'Financial Times',
-    timestamp: new Date(Date.now() - 2.2 * 60 * 60 * 1000).toISOString(),
-    description: 'The index surpassed the 5,850 level for the first time as investor optimism around AI-driven productivity gains and a resilient labor market fueled continued buying.',
-    tag: 'Markets',
-  },
-  {
-    id: 4,
-    headline: 'Apple Unveils AI-Powered Siri Overhaul at WWDC, Partnership with Anthropic Confirmed',
-    source: 'The Wall Street Journal',
-    timestamp: new Date(Date.now() - 3.8 * 60 * 60 * 1000).toISOString(),
-    description: 'The company demonstrated on-device AI capabilities including advanced natural language understanding and personalized context. AAPL shares rose 2.3% in extended trading.',
-    tag: 'Technology',
-  },
-  {
-    id: 5,
-    headline: 'JPMorgan Raises Year-End S&P 500 Target to 6,400 on Strong Corporate Earnings Outlook',
-    source: 'CNBC',
-    timestamp: new Date(Date.now() - 5.1 * 60 * 60 * 1000).toISOString(),
-    description: 'The bank\'s equity strategy team cited improving earnings revisions breadth and receding recession risk as justification for the revised 400-point increase in its year-end price target.',
-    tag: 'Analysis',
-  },
-  {
-    id: 6,
-    headline: 'Crude Oil Falls 2.4% as OPEC+ Production Increase Announcement Surprises Markets',
-    source: 'Reuters',
-    timestamp: new Date(Date.now() - 7.3 * 60 * 60 * 1000).toISOString(),
-    description: 'WTI crude dropped below $72/barrel after the cartel agreed to an additional 400,000 bpd production hike starting July, larger than the 250,000 bpd most analysts anticipated.',
-    tag: 'Commodities',
-  },
-];
-
-// ── Tag colors ────────────────────────────────────────────────
+// ── Tag color map for news ────────────────────────────────────
 
 const TAG_COLORS: Record<string, string> = {
   Macro:       'bg-gold/10 text-gold border-gold/20',
@@ -115,6 +30,16 @@ const TAG_COLORS: Record<string, string> = {
   Analysis:    'bg-off-white/5 text-off-white/60 border-border',
   Commodities: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
 };
+
+function tagForSymbols(symbols: string[]): string {
+  if (!symbols.length) return 'Markets';
+  const tech = ['AAPL','MSFT','GOOGL','NVDA','META','AMZN','TSLA','PLTR','AMD','SMCI'];
+  if (symbols.some((s) => tech.includes(s))) return 'Technology';
+  const energy = ['XOM','CVX','COP','OXY','SLB'];
+  if (symbols.some((s) => energy.includes(s))) return 'Commodities';
+  if (!symbols[0]) return 'Markets';
+  return 'Markets';
+}
 
 // ── Sector heatmap color ──────────────────────────────────────
 
@@ -128,9 +53,42 @@ function sectorColor(pct: number): string {
   return 'bg-loss/70 text-white';
 }
 
+// ── Skeleton helpers ──────────────────────────────────────────
+
+function IndexCardSkeleton() {
+  return (
+    <div className="card p-4 flex flex-col gap-3 animate-pulse">
+      <div className="h-3 w-16 rounded bg-surface-3" />
+      <div className="h-4 w-24 rounded bg-surface-3" />
+      <div className="flex items-end justify-between">
+        <div className="h-5 w-24 rounded bg-surface-3" />
+        <div className="h-4 w-16 rounded bg-surface-3" />
+      </div>
+    </div>
+  );
+}
+
+function StockRowSkeleton() {
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 last:border-0 animate-pulse">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-surface-3" />
+        <div className="space-y-1.5">
+          <div className="h-3 w-16 rounded bg-surface-3" />
+          <div className="h-2.5 w-28 rounded bg-surface-3" />
+        </div>
+      </div>
+      <div className="text-right space-y-1.5">
+        <div className="h-3 w-16 rounded bg-surface-3" />
+        <div className="h-2.5 w-12 rounded bg-surface-3" />
+      </div>
+    </div>
+  );
+}
+
 // ── Sub-components ────────────────────────────────────────────
 
-function IndexCard({ index }: { index: typeof INDICES[0] }) {
+function IndexCard({ index }: { index: IndexQuote }) {
   const isUp = index.changePct >= 0;
   return (
     <div className="card p-4 flex flex-col gap-2">
@@ -147,7 +105,7 @@ function IndexCard({ index }: { index: typeof INDICES[0] }) {
       </div>
       <div className="flex items-end justify-between">
         <span className="text-xl font-mono font-semibold tabular-nums text-off-white">
-          {index.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          {index.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </span>
         <div className={`text-right ${isUp ? 'text-gain' : 'text-loss'}`}>
           <div className="text-sm font-mono tabular-nums font-medium">
@@ -188,7 +146,7 @@ function StockRow({
         </div>
         <div>
           <div className="font-mono font-semibold text-gold text-sm">{ticker}</div>
-          <div className="text-xs text-off-white/50 mt-0.5 max-w-[180px] truncate">{name}</div>
+          <div className="text-xs text-off-white/50 mt-0.5 max-w-[180px] truncate">{name || ticker}</div>
         </div>
       </div>
       <div className="text-right">
@@ -203,11 +161,90 @@ function StockRow({
   );
 }
 
+function NewsCard({ item }: { item: NewsItem }) {
+  const tag = tagForSymbols(item.symbols ?? []);
+  const tagClass = TAG_COLORS[tag] ?? 'bg-surface-3 text-off-white/60 border-border';
+
+  return (
+    <a
+      href={item.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="card p-4 hover:border-gold/20 transition-colors duration-200 cursor-pointer group block"
+    >
+      <div className="flex items-start gap-3 md:gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-2xs font-medium border ${tagClass}`}>
+              {tag}
+            </span>
+            {item.symbols?.slice(0, 2).map((s) => (
+              <span key={s} className="text-xs font-mono text-gold/60">{s}</span>
+            ))}
+            <span className="text-xs text-off-white/20 hidden sm:inline">·</span>
+            <span className="text-xs text-off-white/30 hidden sm:inline">
+              {formatRelativeTime(item.publishedAt)}
+            </span>
+          </div>
+          <h3 className="font-serif text-sm md:text-base font-medium text-off-white group-hover:text-gold transition-colors duration-150 leading-snug mb-1.5">
+            {item.headline}
+          </h3>
+          {item.summary && (
+            <p className="text-xs md:text-sm text-off-white/50 leading-relaxed line-clamp-2 hidden sm:block">
+              {item.summary}
+            </p>
+          )}
+        </div>
+        <ExternalLink
+          size={14}
+          className="text-off-white/20 group-hover:text-gold/60 transition-colors mt-0.5 shrink-0"
+        />
+      </div>
+    </a>
+  );
+}
+
 // ── Markets Page ──────────────────────────────────────────────
 
 export default function Markets() {
   const { setSelectedTicker } = useTrading();
   const [hoveredSector, setHoveredSector] = useState<string | null>(null);
+
+  const {
+    data: indicesData,
+    isLoading: loadingIndices,
+    refetch: refetchIndices,
+  } = useQuery({
+    queryKey: ['market-indices'],
+    queryFn: () => marketApi.getIndices(),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
+  const {
+    data: moversData,
+    isLoading: loadingMovers,
+  } = useQuery({
+    queryKey: ['market-movers'],
+    queryFn: () => marketApi.getMovers(),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
+
+  const {
+    data: newsData,
+    isLoading: loadingNews,
+  } = useQuery({
+    queryKey: ['market-news'],
+    queryFn: () => marketApi.getNews(undefined, 8),
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+
+  const indices  = indicesData?.indices  ?? [];
+  const gainers  = moversData?.gainers   ?? [];
+  const losers   = moversData?.losers    ?? [];
+  const newsItems = newsData?.news       ?? [];
 
   return (
     <div className="min-h-screen bg-obsidian">
@@ -221,15 +258,24 @@ export default function Markets() {
               Real-time market data &amp; analysis
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-off-white/30">
-            <Clock size={12} />
-            <span>
-              {new Date().toLocaleTimeString('en-US', {
-                hour: '2-digit',
-                minute: '2-digit',
-                timeZone: 'America/New_York',
-              })} ET
-            </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => refetchIndices()}
+              className="p-1.5 rounded-md hover:bg-surface-3 transition-colors text-off-white/30 hover:text-off-white/60"
+              title="Refresh"
+            >
+              <RefreshCw size={14} />
+            </button>
+            <div className="flex items-center gap-2 text-xs text-off-white/30">
+              <Clock size={12} />
+              <span>
+                {new Date().toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  timeZone: 'America/New_York',
+                })} ET
+              </span>
+            </div>
           </div>
         </div>
 
@@ -240,9 +286,10 @@ export default function Markets() {
             <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Market Indices</h2>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-            {INDICES.map((idx) => (
-              <IndexCard key={idx.symbol} index={idx} />
-            ))}
+            {loadingIndices
+              ? Array.from({ length: 4 }).map((_, i) => <IndexCardSkeleton key={i} />)
+              : indices.map((idx) => <IndexCard key={idx.symbol} index={idx} />)
+            }
           </div>
         </div>
 
@@ -256,14 +303,20 @@ export default function Markets() {
               <span className="ml-auto text-xs text-off-white/30">Today</span>
             </div>
             <div>
-              {TOP_GAINERS.map((s) => (
-                <StockRow
-                  key={s.ticker}
-                  {...s}
-                  isGainer={true}
-                  onClick={() => setSelectedTicker(s.ticker)}
-                />
-              ))}
+              {loadingMovers
+                ? Array.from({ length: 5 }).map((_, i) => <StockRowSkeleton key={i} />)
+                : gainers.slice(0, 5).map((s: MoverEntry) => (
+                    <StockRow
+                      key={s.symbol}
+                      ticker={s.symbol}
+                      name={s.name ?? s.symbol}
+                      price={s.price}
+                      changePct={s.changePct}
+                      isGainer={true}
+                      onClick={() => setSelectedTicker(s.symbol)}
+                    />
+                  ))
+              }
             </div>
           </div>
 
@@ -275,74 +328,72 @@ export default function Markets() {
               <span className="ml-auto text-xs text-off-white/30">Today</span>
             </div>
             <div>
-              {TOP_LOSERS.map((s) => (
-                <StockRow
-                  key={s.ticker}
-                  {...s}
-                  isGainer={false}
-                  onClick={() => setSelectedTicker(s.ticker)}
-                />
-              ))}
+              {loadingMovers
+                ? Array.from({ length: 5 }).map((_, i) => <StockRowSkeleton key={i} />)
+                : losers.slice(0, 5).map((s: MoverEntry) => (
+                    <StockRow
+                      key={s.symbol}
+                      ticker={s.symbol}
+                      name={s.name ?? s.symbol}
+                      price={s.price}
+                      changePct={s.changePct}
+                      isGainer={false}
+                      onClick={() => setSelectedTicker(s.symbol)}
+                    />
+                  ))
+              }
             </div>
           </div>
         </div>
 
-        {/* ── Sector Heatmap — horizontally scrollable on mobile ── */}
-        <div className="card p-4 md:p-5">
-          <div className="flex items-center gap-2 mb-3 md:mb-4">
-            <BarChart2 size={15} className="text-gold" />
-            <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Sector Performance</h2>
-            <span className="ml-auto text-xs text-off-white/30 hidden sm:inline">S&amp;P 500 Sectors · Today</span>
-          </div>
-          {/* Mobile: horizontal scroll; Desktop: grid */}
-          <div className="overflow-x-auto scrollbar-hidden -mx-4 md:mx-0 px-4 md:px-0">
-            <div className="flex gap-2 md:grid md:grid-cols-4 lg:grid-cols-11 min-w-max md:min-w-0">
-              {SECTORS.map((sector) => {
-                const isHovered = hoveredSector === sector.name;
-                const colorClass = sectorColor(sector.changePct);
-                const isPos = sector.changePct >= 0;
-                return (
-                  <div
-                    key={sector.name}
-                    className={`relative rounded-lg p-2 md:p-3 flex flex-col items-center justify-center gap-1 cursor-default transition-all duration-200 border border-transparent ${colorClass} ${isHovered ? 'scale-105 shadow-surface-lg border-white/10 z-10' : ''}`}
-                    style={{ minHeight: '70px', minWidth: '72px' }}
-                    onMouseEnter={() => setHoveredSector(sector.name)}
-                    onMouseLeave={() => setHoveredSector(null)}
-                  >
-                    <div className="text-[10px] md:text-xs font-medium text-center leading-tight opacity-90">
-                      {sector.name}
-                    </div>
-                    <div className="text-xs md:text-sm font-mono font-bold tabular-nums">
-                      {isPos ? '+' : ''}{sector.changePct.toFixed(2)}%
-                    </div>
-                    {isHovered && (
-                      <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-surface-2 border border-border rounded px-2 py-1 text-xs whitespace-nowrap text-off-white z-20 shadow-surface-lg pointer-events-none">
-                        {sector.name}: {isPos ? '+' : ''}{sector.changePct.toFixed(2)}%
+        {/* ── Sector Heatmap ──────────────────────────────────── */}
+        {/* Populated from movers data; shows when available */}
+        {moversData && gainers.length > 0 && (
+          <div className="card p-4 md:p-5">
+            <div className="flex items-center gap-2 mb-3 md:mb-4">
+              <BarChart2 size={15} className="text-gold" />
+              <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Sector Performance</h2>
+              <span className="ml-auto text-xs text-off-white/30 hidden sm:inline">S&amp;P 500 Sectors · Today</span>
+            </div>
+            <div className="overflow-x-auto scrollbar-hidden -mx-4 md:mx-0 px-4 md:px-0">
+              <div className="flex gap-2 md:grid md:grid-cols-4 lg:grid-cols-6 min-w-max md:min-w-0">
+                {gainers.slice(0, 6).map((s) => {
+                  const isHovered = hoveredSector === s.symbol;
+                  const colorClass = sectorColor(s.changePct);
+                  const isPos = s.changePct >= 0;
+                  return (
+                    <div
+                      key={s.symbol}
+                      className={`relative rounded-lg p-2 md:p-3 flex flex-col items-center justify-center gap-1 cursor-pointer transition-all duration-200 border border-transparent ${colorClass} ${isHovered ? 'scale-105 shadow-surface-lg border-white/10 z-10' : ''}`}
+                      style={{ minHeight: '70px', minWidth: '72px' }}
+                      onMouseEnter={() => setHoveredSector(s.symbol)}
+                      onMouseLeave={() => setHoveredSector(null)}
+                      onClick={() => setSelectedTicker(s.symbol)}
+                    >
+                      <div className="text-[10px] md:text-xs font-bold text-center leading-tight">{s.symbol}</div>
+                      <div className="text-xs md:text-sm font-mono font-bold tabular-nums">
+                        {isPos ? '+' : ''}{s.changePct.toFixed(2)}%
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 md:gap-4 mt-4 pt-3 border-t border-border flex-wrap">
+              <span className="text-xs text-off-white/30">Scale:</span>
+              <div className="flex items-center gap-1">
+                {[-1.5, -0.8, -0.3, 0.1, 0.5, 1.0, 1.8].map((v) => (
+                  <div key={v} className={`w-4 md:w-5 h-3 rounded-sm ${sectorColor(v)}`} />
+                ))}
+              </div>
+              <div className="flex items-center gap-2 md:gap-3 text-xs">
+                <span className="text-loss">Bearish</span>
+                <span className="text-off-white/30">→</span>
+                <span className="text-gain">Bullish</span>
+              </div>
             </div>
           </div>
-          {/* Legend */}
-          <div className="flex items-center gap-3 md:gap-4 mt-4 pt-3 border-t border-border flex-wrap">
-            <span className="text-xs text-off-white/30">Scale:</span>
-            <div className="flex items-center gap-1">
-              {[-1.5, -0.8, -0.3, 0.1, 0.5, 1.0, 1.8].map((v) => (
-                <div
-                  key={v}
-                  className={`w-4 md:w-5 h-3 rounded-sm ${sectorColor(v)}`}
-                />
-              ))}
-            </div>
-            <div className="flex items-center gap-2 md:gap-3 text-xs">
-              <span className="text-loss">Bearish</span>
-              <span className="text-off-white/30">→</span>
-              <span className="text-gain">Bullish</span>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* ── News Feed ───────────────────────────────────────── */}
         <div>
@@ -351,35 +402,18 @@ export default function Markets() {
             <h2 className="font-serif text-base md:text-lg font-medium text-off-white">Market News</h2>
           </div>
           <div className="space-y-3">
-            {NEWS.map((item) => (
-              <div
-                key={item.id}
-                className="card p-4 hover:border-gold/20 transition-colors duration-200 cursor-pointer group"
-              >
-                <div className="flex items-start gap-3 md:gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-2xs font-medium border ${TAG_COLORS[item.tag] ?? 'bg-surface-3 text-off-white/60 border-border'}`}>
-                        {item.tag}
-                      </span>
-                      <span className="text-xs text-off-white/30">{item.source}</span>
-                      <span className="text-xs text-off-white/20 hidden sm:inline">·</span>
-                      <span className="text-xs text-off-white/30 hidden sm:inline">{formatRelativeTime(item.timestamp)}</span>
+            {loadingNews
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="card p-4 animate-pulse">
+                    <div className="space-y-2">
+                      <div className="h-3 w-24 rounded bg-surface-3" />
+                      <div className="h-4 w-4/5 rounded bg-surface-3" />
+                      <div className="h-3 w-full rounded bg-surface-3" />
                     </div>
-                    <h3 className="font-serif text-sm md:text-base font-medium text-off-white group-hover:text-gold transition-colors duration-150 leading-snug mb-1.5">
-                      {item.headline}
-                    </h3>
-                    <p className="text-xs md:text-sm text-off-white/50 leading-relaxed line-clamp-2 hidden sm:block">
-                      {item.description}
-                    </p>
                   </div>
-                  <ExternalLink
-                    size={14}
-                    className="text-off-white/20 group-hover:text-gold/60 transition-colors mt-0.5 shrink-0"
-                  />
-                </div>
-              </div>
-            ))}
+                ))
+              : newsItems.map((item, i) => <NewsCard key={i} item={item} />)
+            }
           </div>
         </div>
 

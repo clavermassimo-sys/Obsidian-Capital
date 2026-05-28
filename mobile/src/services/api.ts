@@ -191,7 +191,7 @@ export interface HistoryResponse {
   history: HistoryPoint[];
 }
 
-export interface AlpacaOrder {
+export interface IBKROrder {
   id: string;
   symbol: string;
   side: 'buy' | 'sell';
@@ -207,8 +207,11 @@ export interface AlpacaOrder {
   commission?: number;
 }
 
+/** @deprecated Use IBKROrder */
+export type AlpacaOrder = IBKROrder;
+
 export interface OrdersResponse {
-  orders: AlpacaOrder[];
+  orders: IBKROrder[];
 }
 
 export interface AccountData {

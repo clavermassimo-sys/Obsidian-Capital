@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { Colors } from '@/constants/colors';
 import { tradesApi } from '@/services/api';
-import type { AlpacaOrder } from '@/services/api';
+import type { IBKROrder } from '@/services/api';
 import { formatCurrency, formatDateTime } from '@/utils/format';
 import { SkeletonRow } from '@/components/LoadingSkeleton';
 
@@ -63,7 +63,7 @@ const statusStyle = StyleSheet.create({
 
 // ── Order Card ────────────────────────────────────────────────
 
-function OrderCard({ order }: { order: AlpacaOrder }) {
+function OrderCard({ order }: { order: IBKROrder }) {
   const isBuy    = order.side === 'buy';
   const sideColor = isBuy ? Colors.gain : Colors.loss;
   const qty       = parseFloat(String(order.qty));
@@ -219,7 +219,7 @@ export default function OrdersScreen() {
   }, [allOrders, filter]);
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<AlpacaOrder>) => <OrderCard order={item} />,
+    ({ item }: ListRenderItemInfo<IBKROrder>) => <OrderCard order={item} />,
     []
   );
 

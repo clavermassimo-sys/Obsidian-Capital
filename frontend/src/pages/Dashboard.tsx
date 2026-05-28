@@ -160,7 +160,7 @@ function CommissionTierCard({ tier }: { tier: string }) {
       </div>
       {nextTier && savings && (
         <Link
-          to="/account"
+          to="/settings/billing"
           className="flex items-center gap-1.5 text-xs text-gold hover:text-[#e0c070] transition-colors"
         >
           Upgrade to {nextTier} · save {savings} on commissions <ArrowUpRight size={12} />
@@ -341,7 +341,7 @@ function UpgradePromptBanner({ tier, monthlyVolume }: { tier: string; monthlyVol
         by upgrading to <span className="text-gold font-medium">{upgradeName}</span>.
       </span>
       <Link
-        to="/account"
+        to="/settings/billing"
         className="flex items-center gap-1 text-xs text-gold font-semibold hover:text-[#e0c070] transition-colors whitespace-nowrap"
       >
         Upgrade <ArrowUpRight size={12} />
@@ -446,7 +446,7 @@ export default function Dashboard() {
                   Connect your Interactive Brokers account to see live portfolio data
                 </p>
                 <Link
-                  to="/account"
+                  to="/settings/billing"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gold text-obsidian text-xs font-bold hover:brightness-110 transition-all"
                 >
                   Connect <ExternalLink size={12} />

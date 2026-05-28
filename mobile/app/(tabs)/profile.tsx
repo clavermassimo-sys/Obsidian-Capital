@@ -266,7 +266,7 @@ export default function ProfileScreen() {
         <MenuSection title="Account">
           <MenuRow
             icon="🔗"
-            label="Alpaca Connection"
+            label="IBKR Connection"
             value="Connected"
             valueColor={Colors.gain}
             onPress={() => {}}
