@@ -38,7 +38,7 @@ router.post('/auth', adminLimiter, (req: Request, res: Response): void => {
     return;
   }
 
-  if (!code || code !== ADMIN_CODE) {
+  if (!code || code.trim() !== ADMIN_CODE.trim()) {
     res.status(401).json({ success: false, error: 'Invalid access code.' });
     return;
   }
