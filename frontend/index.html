@@ -3,79 +3,38 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <!-- Primary Meta -->
-    <title>Obsidian Capital — Private Wealth Brokerage</title>
-    <meta name="description" content="Obsidian Capital offers a distinguished brokerage experience for discerning investors. Seamless execution, transparent pricing, and personalized service for every tier of membership." />
-    <meta name="theme-color" content="#0a0a0a" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="description" content="Obsidian Capital — Private Wealth Brokerage" />
     <meta name="robots" content="noindex, nofollow" />
-
-    <!-- Open Graph -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Obsidian Capital — Private Wealth Brokerage" />
-    <meta property="og:description" content="Obsidian Capital offers a distinguished brokerage experience for discerning investors." />
-    <meta property="og:image" content="/og-image.png" />
-    <meta property="og:site_name" content="Obsidian Capital" />
-
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Obsidian Capital — Private Wealth Brokerage" />
-    <meta name="twitter:description" content="A distinguished brokerage experience for discerning investors." />
-
-    <!-- Favicon -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Obsidian" />
+    <title>Obsidian Capital</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
-
-    <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-
-    <!-- Google Fonts: Inter + Playfair Display -->
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap"
-      rel="stylesheet"
-    />
-
-    <!-- Inline critical styles to prevent FOUC -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
     <style>
-      html, body {
-        background-color: #0a0a0a;
-        color: #f0ede8;
-        margin: 0;
-        padding: 0;
-      }
-      #root {
-        min-height: 100vh;
-      }
-      /* Loading spinner shown before React mounts */
+      html, body { background: #000; color: #f5f5f7; margin: 0; padding: 0; }
+      #root { min-height: 100vh; }
       .initial-loader {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 100vh;
-        background: #0a0a0a;
+        position: fixed; inset: 0; display: flex; align-items: center;
+        justify-content: center; background: #000; z-index: 9999;
+        transition: opacity 0.3s ease;
       }
       .initial-loader__wordmark {
-        font-family: 'Playfair Display', Georgia, serif;
-        font-size: 1.5rem;
-        font-weight: 500;
-        color: #c9a84c;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        opacity: 0;
-        animation: wordmarkFade 0.8s ease-out 0.2s forwards;
+        font-family: -apple-system, 'Inter', sans-serif;
+        font-size: 13px; font-weight: 300; letter-spacing: 0.35em;
+        color: rgba(255,255,255,0.35); text-transform: uppercase;
+        animation: wFade 1.2s ease-in-out forwards;
       }
-      @keyframes wordmarkFade {
-        from { opacity: 0; transform: translateY(4px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
+      @keyframes wFade { from { opacity:0; } to { opacity:1; } }
     </style>
   </head>
   <body>
     <div id="root">
-      <!-- Shown before React hydrates -->
       <div class="initial-loader">
         <span class="initial-loader__wordmark">Obsidian Capital</span>
       </div>

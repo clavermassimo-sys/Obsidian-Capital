@@ -7,6 +7,8 @@ import morgan from 'morgan';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 
+import Stripe from 'stripe';
+
 import { alpacaBroker } from './services/alpaca-broker';
 import { polygonService } from './services/polygon';
 import { query as dbQuery } from './config/database';
@@ -109,14 +111,145 @@ app.use('/api/', apiLimiter);
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
-    service: 'obsidian-capital-api',
-    version: process.env.npm_package_version || '1.0.0',
-    environment: NODE_ENV,
+// ── Startup API Verification ────────────────────────────────────
+async function verifyConnections(): Promise<void> {
+  const log = (ok: boolean, name: string, detail = '') => {
+    const icon = ok ? '✅' : '❌';
+    const msg  = ok ? `${name} connected` : `${name} failed${detail ? ': ' + detail : ''}`;
+    console.log(`${icon}  ${msg}`);
+  };
+
+  // Database
+  try {
+    await dbQuery('SELECT 1');
+    log(true, 'Database');
+  } catch (e: unknown) {
+    log(false, 'Database', (e as Error).message);
+  }
+
+  // Polygon.io
+  const polygonKey = process.env.POLYGON_API_KEY;
+  if (polygonKey) {
+    try {
+      const r = await (await import('axios')).default.get(
+        `https://api.polygon.io/v2/aggs/ticker/AAPL/range/1/day/2024-01-01/2024-01-02?apiKey=${polygonKey}`,
+        { timeout: 5000 }
+      );
+      log(r.status === 200, 'Polygon.io');
+    } catch (e: unknown) {
+      log(false, 'Polygon.io', (e as Error).message);
+    }
+  } else {
+    log(false, 'Polygon.io', 'POLYGON_API_KEY not set');
+  }
+
+  // Alpaca
+  const alpacaKey    = process.env.ALPACA_BROKER_KEY;
+  const alpacaSecret = process.env.ALPACA_BROKER_SECRET;
+  if (alpacaKey && alpacaSecret) {
+    try {
+      const axiosInst = (await import('axios')).default;
+      const base = process.env.NODE_ENV === 'production'
+        ? 'https://broker-api.alpaca.markets'
+        : 'https://broker-api.sandbox.alpaca.markets';
+      const r = await axiosInst.get(`${base}/v1/accounts?max_results=1`, {
+        auth: { username: alpacaKey, password: alpacaSecret },
+        timeout: 5000,
+      });
+      log(r.status === 200, 'Alpaca Broker');
+    } catch (e: unknown) {
+      log(false, 'Alpaca Broker', (e as Error).message);
+    }
+  } else {
+    log(false, 'Alpaca Broker', 'Keys not set');
+  }
+
+  // Stripe
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (stripeKey && stripeKey.startsWith('sk_')) {
+    try {
+      const stripe = new Stripe(stripeKey, { apiVersion: '2025-02-24.acacia' });
+      await stripe.balance.retrieve();
+      log(true, 'Stripe');
+    } catch (e: unknown) {
+      log(false, 'Stripe', (e as Error).message);
+    }
+  } else {
+    log(false, 'Stripe', 'STRIPE_SECRET_KEY not set');
+  }
+}
+
+// ── Health Endpoint ─────────────────────────────────────────────
+app.get('/health', async (_req: Request, res: Response): Promise<void> => {
+  const checks: Record<string, { ok: boolean; latency?: number; detail?: string }> = {};
+
+  // Database
+  const dbStart = Date.now();
+  try {
+    await dbQuery('SELECT 1');
+    checks.database = { ok: true, latency: Date.now() - dbStart };
+  } catch (e: unknown) {
+    checks.database = { ok: false, detail: (e as Error).message };
+  }
+
+  // Polygon
+  const polygonKey = process.env.POLYGON_API_KEY;
+  if (!polygonKey) {
+    checks.polygon = { ok: false, detail: 'key not set' };
+  } else {
+    const t = Date.now();
+    try {
+      const r = await (await import('axios')).default.get(
+        `https://api.polygon.io/v2/aggs/ticker/AAPL/range/1/day/2024-01-01/2024-01-02?apiKey=${polygonKey}`,
+        { timeout: 4000 }
+      );
+      checks.polygon = { ok: r.status === 200, latency: Date.now() - t };
+    } catch (e: unknown) {
+      checks.polygon = { ok: false, detail: (e as Error).message };
+    }
+  }
+
+  // Alpaca
+  const alpacaKey    = process.env.ALPACA_BROKER_KEY;
+  const alpacaSecret = process.env.ALPACA_BROKER_SECRET;
+  if (!alpacaKey || !alpacaSecret) {
+    checks.alpaca = { ok: false, detail: 'keys not set' };
+  } else {
+    const t = Date.now();
+    try {
+      const base = process.env.NODE_ENV === 'production'
+        ? 'https://broker-api.alpaca.markets'
+        : 'https://broker-api.sandbox.alpaca.markets';
+      const r = await (await import('axios')).default.get(`${base}/v1/accounts?max_results=1`, {
+        auth: { username: alpacaKey, password: alpacaSecret },
+        timeout: 4000,
+      });
+      checks.alpaca = { ok: r.status === 200, latency: Date.now() - t };
+    } catch (e: unknown) {
+      checks.alpaca = { ok: false, detail: (e as Error).message };
+    }
+  }
+
+  // Stripe
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeKey || !stripeKey.startsWith('sk_')) {
+    checks.stripe = { ok: false, detail: 'key not set' };
+  } else {
+    const t = Date.now();
+    try {
+      const stripe = new Stripe(stripeKey, { apiVersion: '2025-02-24.acacia' });
+      await stripe.balance.retrieve();
+      checks.stripe = { ok: true, latency: Date.now() - t };
+    } catch (e: unknown) {
+      checks.stripe = { ok: false, detail: (e as Error).message };
+    }
+  }
+
+  const allOk = Object.values(checks).every((c) => c.ok);
+  res.status(allOk ? 200 : 207).json({
+    status: allOk ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
-    uptime: Math.floor(process.uptime()),
+    services: checks,
   });
 });
 
@@ -430,6 +563,7 @@ httpServer.listen(PORT, () => {
   console.log(`│    GET  /api/admin/stats                         │`);
   console.log(`│  WebSocket: ws://localhost:${PORT}                  │`);
   console.log(`└─────────────────────────────────────────────────┘\n`);
+  verifyConnections();
 });
 
 export { app, httpServer, io };
