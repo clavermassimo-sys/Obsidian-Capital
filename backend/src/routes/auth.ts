@@ -515,7 +515,7 @@ router.post('/kyc/verify', authenticate, sensitiveActionLimiter, async (req: Req
        WHERE stripe_verification_session_id = $3`,
       [
         session.status,
-        session.status === 'verified' ? new Date() : null,
+        session.status === 'verified' ? new Date().toISOString() : null,
         session_id,
       ]
     );

@@ -11,6 +11,7 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
+import { io, Socket } from 'socket.io-client';
 import type {
   Holding,
   Trade,
@@ -96,6 +97,44 @@ interface TradingContextValue {
 
 const TradingContext = createContext<TradingContextValue | null>(null);
 
+// ── Helpers ───────────────────────────────────────────────────
+
+function getStoredToken(): string {
+  try {
+    const stored = localStorage.getItem('oc_user');
+    if (stored) return JSON.parse(stored).token || '';
+  } catch { /* ignore */ }
+  return '';
+}
+
+// ── Order update event shape from Socket.IO ───────────────────
+
+interface OrderUpdateEvent {
+  trade_id:      string;
+  ibkr_order_id: string;
+  ticker:        string;
+  side:          string;
+  qty:           number;
+  price:         number | null;
+  status:        string;
+  commission:    number;
+  total:         number;
+  created_at:    string;
+}
+
+// ── Price update event shape from Socket.IO ───────────────────
+
+interface PriceUpdateEntry {
+  ticker:     string;
+  price:      number;
+  change:     number;
+  change_pct: number;
+}
+
+interface PriceUpdateEvent {
+  updates: PriceUpdateEntry[];
+}
+
 export function TradingProvider({ children }: { children: ReactNode }) {
   const [holdings, setHoldings]       = useState<Holding[]>([]);
   const [trades, setTrades]           = useState<Trade[]>([]);
@@ -124,13 +163,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           ticker:      o.symbol,
           companyName: o.symbol,
           type:        o.side as 'buy' | 'sell',
-          orderType:   o.type as any,
+          orderType:   o.type as Trade['orderType'],
           shares:      parseFloat(String(o.filled_qty ?? o.qty)) || 0,
           price:       parseFloat(String(o.filled_avg_price ?? 0)) || 0,
           commission:  o.commission ?? 0,
           total:       (parseFloat(String(o.filled_avg_price ?? 0)) || 0) * (parseFloat(String(o.filled_qty ?? 0)) || 0),
           timestamp:   o.submitted_at,
-          status:      o.status as any,
+          status:      o.status as Trade['status'],
           limitPrice:  o.limit_price ? parseFloat(String(o.limit_price)) : undefined,
         }));
         setTrades(mapped);
@@ -145,6 +184,79 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveWatchlist(watchlist);
   }, [watchlist]);
+
+  // ── Socket.IO real-time updates ───────────────────────────
+
+  useEffect(() => {
+    const token = getStoredToken();
+    if (!token) return;
+
+    const socket: Socket = io(
+      import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:3001',
+      {
+        transports: ['websocket', 'polling'],
+        reconnectionAttempts: 5,
+        reconnectionDelay: 2000,
+      }
+    );
+
+    socket.on('connect', () => {
+      // Authenticate so the server can place this socket in user:{userId} room
+      socket.emit('auth', { token });
+    });
+
+    // Listen for order updates pushed by the server after trade execution
+    socket.on('order:update', (event: OrderUpdateEvent) => {
+      setTrades((prev) => {
+        const existing = prev.find((t) => t.id === event.trade_id);
+        if (existing) {
+          // Update status of an already-tracked trade
+          return prev.map((t) =>
+            t.id === event.trade_id
+              ? { ...t, status: event.status as Trade['status'] }
+              : t
+          );
+        }
+        // New trade from this session — prepend it
+        const newTrade: Trade = {
+          id:          event.trade_id,
+          ticker:      event.ticker,
+          companyName: event.ticker,
+          type:        event.side.toLowerCase() as 'buy' | 'sell',
+          orderType:   'market',
+          shares:      event.qty,
+          price:       event.price ?? 0,
+          commission:  event.commission,
+          total:       event.total,
+          timestamp:   event.created_at,
+          status:      event.status as Trade['status'],
+        };
+        return [newTrade, ...prev];
+      });
+    });
+
+    // Listen for price updates to keep holdings current prices fresh
+    socket.on('price:update', (event: PriceUpdateEvent) => {
+      setHoldings((prev) => {
+        if (prev.length === 0) return prev;
+        let changed = false;
+        const updated = prev.map((h) => {
+          const tick = event.updates.find((u) => u.ticker === h.ticker);
+          if (!tick) return h;
+          changed = true;
+          const marketValue  = parseFloat((h.shares * tick.price).toFixed(2));
+          const returnDollar = parseFloat((marketValue - h.shares * h.avgCost).toFixed(2));
+          const returnPct    = h.avgCost > 0 ? parseFloat(((returnDollar / (h.shares * h.avgCost)) * 100).toFixed(2)) : 0;
+          return { ...h, currentPrice: tick.price, marketValue, returnDollar, returnPct };
+        });
+        return changed ? updated : prev;
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
   // ── Preview order (uses real API if available) ────────────
 
@@ -191,28 +303,45 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
   const submitOrder = useCallback(
     async (req: OrderRequest, tier: CommissionTier): Promise<Trade> => {
-      let orderResult: any;
+      const preview = await previewOrder(req, tier);
+
+      // Map frontend orderType → IBKR orderType
+      const ibkrOrderType: Record<string, string> = {
+        market: 'MKT',
+        limit:  'LMT',
+        stop:   'STP',
+      };
+
+      // The backend /trades/order endpoint expects ticker, company_name, conid, side, qty, orderType, tif
+      // conid is looked up server-side via searchContracts when not provided, but the current
+      // validation schema requires it. We set conid=0 here and let the backend handle symbol search.
+      // NOTE: If the caller has already resolved the conid, pass it via req.conid.
+      const orderPayload = {
+        ticker:       req.ticker,
+        company_name: preview.companyName || req.ticker,
+        conid:        (req as OrderRequest & { conid?: number }).conid ?? 0,
+        side:         req.side.toUpperCase() as 'BUY' | 'SELL',
+        qty:          req.shares,
+        orderType:    ibkrOrderType[req.orderType] ?? 'MKT',
+        tif:          'DAY',
+        ...(req.limitPrice  !== undefined && { price:    req.limitPrice }),
+        ...(req.stopPrice   !== undefined && { auxPrice: req.stopPrice }),
+        estimatedPrice: preview.estimatedPrice,
+      };
+
+      let orderResult: { data?: { trade_id?: string; order?: { orderId?: string; status?: string; avgFillPrice?: number } } } | null = null;
       try {
-        orderResult = await tradesApi.placeOrder({
-          symbol:        req.ticker,
-          side:          req.side,
-          qty:           req.shares,
-          type:          req.orderType,
-          limit_price:   req.limitPrice,
-          stop_price:    req.stopPrice,
-          time_in_force: 'day',
-        });
+        orderResult = await tradesApi.placeOrder(orderPayload);
       } catch {
-        // Fallback: simulate a trade locally if API unavailable
-        await new Promise((r) => setTimeout(r, 600));
-        orderResult = null;
+        // If API call fails, rethrow — we don't simulate real trades
+        throw new Error('Order submission failed. Please check your IBKR connection and try again.');
       }
 
-      const preview = await previewOrder(req, tier);
-      const price = parseFloat(orderResult?.filled_avg_price) || preview.estimatedPrice;
+      const ibkrOrder = orderResult?.data?.order;
+      const price = ibkrOrder?.avgFillPrice ?? preview.estimatedPrice;
 
       const trade: Trade = {
-        id:          orderResult?.id ?? `trd_${Date.now()}`,
+        id:          orderResult?.data?.trade_id ?? `trd_${Date.now()}`,
         ticker:      req.ticker,
         companyName: preview.companyName,
         type:        req.side,
@@ -222,7 +351,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         commission:  preview.commissionAmount,
         total:       preview.total,
         timestamp:   new Date().toISOString(),
-        status:      orderResult?.status ?? 'filled',
+        status:      (ibkrOrder?.status?.toLowerCase() as Trade['status']) ?? 'pending',
         limitPrice:  req.limitPrice,
       };
       setTrades((prev) => [trade, ...prev]);

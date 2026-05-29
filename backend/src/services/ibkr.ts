@@ -143,7 +143,8 @@ function handleIBKRError(err: unknown, context: string): never {
 // ─── IBKRService Class ────────────────────────────────────────────────────────
 
 export class IBKRService {
-  private client: AxiosInstance;
+  /** Exposed for raw endpoint access (e.g. performance, custom calls) */
+  readonly client: AxiosInstance;
   private accessToken: string;
 
   constructor(accessToken: string) {
@@ -257,21 +258,20 @@ export class IBKRService {
       throw new Error('[IBKR] placeOrder: No access token configured.');
     }
     try {
-      const orderBody = {
-        acctId: params.acctId,
-        conid: params.conid,
+      const singleOrder: Record<string, unknown> = {
+        conid:     params.conid,
         orderType: params.orderType,
-        side: params.side,
-        quantity: params.quantity,
-        tif: params.tif,
-        ...(params.price !== undefined && { price: params.price }),
-        ...(params.auxPrice !== undefined && { auxPrice: params.auxPrice }),
+        side:      params.side,
+        quantity:  params.quantity,
+        tif:       params.tif,
+        ...(params.price           !== undefined && { price:           params.price }),
+        ...(params.auxPrice        !== undefined && { auxPrice:        params.auxPrice }),
         ...(params.trailingPercent !== undefined && { trailingPercent: params.trailingPercent }),
       };
 
       const { data } = await this.client.post<IBKRPlaceOrderResponseRaw[]>(
         `/iserver/account/${encodeURIComponent(params.acctId)}/orders`,
-        [orderBody]
+        { orders: [singleOrder] }
       );
 
       const result = Array.isArray(data) ? data[0] : (data as IBKRPlaceOrderResponseRaw);
@@ -339,6 +339,83 @@ export class IBKRService {
     }
   }
 
+  // ─── Session ────────────────────────────────────────────────────────────────
+
+  /**
+   * Keep the IBKR session alive.
+   * Hits GET /tickle — returns { session: string, ssoExpires: number, ... }
+   */
+  async ping(): Promise<boolean> {
+    try {
+      await this.client.get('/tickle');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // ─── Account Summary ────────────────────────────────────────────────────────
+
+  /**
+   * Fetch account summary directly (alias for getAccount that matches the
+   * IBKR endpoint name GET /portfolio/{accountId}/summary).
+   */
+  async getAccountSummary(accountId: string): Promise<IBKRAccount> {
+    return this.getAccount(accountId);
+  }
+
+  // ─── Market Data Subscription ────────────────────────────────────────────────
+
+  /**
+   * Request market-data subscriptions for the given contract IDs.
+   * IBKR's live streaming runs over their own WebSocket; this stub returns the
+   * subscription metadata so callers can wire up the actual WS channel.
+   *
+   * Fields reference:  31=last, 84=bid, 86=ask, 7295=high, 7296=low, 87=volume
+   */
+  async streamMarketData(
+    conids: number[],
+    fields: string[] = ['31', '84', '86', '7295', '7296', '87'],
+  ): Promise<{ conids: number[]; fields: string[]; endpoint: string }> {
+    // The Client Portal API streams via wss://{host}/v1/api/ws
+    // This method returns the subscription parameters so the caller can
+    // open the WebSocket and send the "smd+{conid}+{fields}" frame.
+    return {
+      conids,
+      fields,
+      endpoint: `${process.env.IBKR_BASE_URL || 'https://api.ibkr.com/v1/api'}/ws`,
+    };
+  }
+
+  // ─── Order Status ────────────────────────────────────────────────────────────
+
+  async getOrderStatus(orderId: string): Promise<IBKROrder> {
+    if (!this.accessToken) {
+      throw new Error('[IBKR] getOrderStatus: No access token configured.');
+    }
+    try {
+      const { data } = await this.client.get<IBKROrderRaw>(
+        `/iserver/account/order/status/${encodeURIComponent(orderId)}`
+      );
+      return {
+        orderId:        data.orderId   || orderId,
+        conid:          data.conid     ?? 0,
+        ticker:         data.ticker    || '',
+        side:           data.side      || '',
+        orderType:      data.orderType || '',
+        quantity:       data.totalSize ?? 0,
+        price:          data.price     ?? null,
+        status:         data.status    || '',
+        filledQuantity: data.filledQuantity ?? 0,
+        avgFillPrice:   data.avgFillPrice   ?? null,
+        timeInForce:    data.timeInForce    || '',
+        createdAt:      data.lastExecutionTime || new Date().toISOString(),
+      };
+    } catch (err) {
+      handleIBKRError(err, `getOrderStatus(${orderId})`);
+    }
+  }
+
   // ─── Contracts ─────────────────────────────────────────────────────────────
 
   async searchContracts(symbol: string): Promise<IBKRContract[]> {
@@ -348,7 +425,7 @@ export class IBKRService {
     }
     try {
       const { data } = await this.client.get<IBKRSearchContractRaw[]>('/iserver/secdef/search', {
-        params: { symbol: symbol.toUpperCase(), secType: 'STK' },
+        params: { symbol: symbol.toUpperCase(), name: true, secType: 'STK' },
       });
       const results = Array.isArray(data) ? data : [];
       return results.map((c) => ({

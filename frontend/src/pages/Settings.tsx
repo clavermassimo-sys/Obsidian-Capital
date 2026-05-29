@@ -3,7 +3,7 @@
    Tabs: Profile | Security | Billing | Notifications | Bank | Tax
    ============================================================ */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   User,
@@ -32,6 +32,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { PageContent, PageHeader } from '@/components/layout/AppLayout';
+import { ibkrApi } from '@/services/api';
+import type { IBKRAccountData } from '@/services/api';
 
 // ── Shared Styles ─────────────────────────────────────────────
 
@@ -303,8 +305,53 @@ function SecurityTab() {
   const [twoFAEnabled, setTwoFAEnabled] = useState(false);
   const [changingPw, setChangingPw]   = useState(false);
   const [pwSuccess, setPwSuccess]     = useState(false);
-  const [ibkrConnected, setIbkrConnected] = useState(true);
+  const [ibkrConnected, setIbkrConnected] = useState(false);
+  const [ibkrAccount, setIbkrAccount]     = useState<IBKRAccountData | null>(null);
+  const [ibkrLoading, setIbkrLoading]     = useState(false);
+  const [ibkrConnecting, setIbkrConnecting] = useState(false);
   const [disconnectModal, setDisconnectModal] = useState(false);
+
+  // Fetch IBKR connection status on mount
+  useEffect(() => {
+    ibkrApi.getAccount()
+      .then((res) => {
+        if (res.data.ibkr_connected && res.data.account) {
+          setIbkrConnected(true);
+          setIbkrAccount(res.data.account);
+        } else {
+          setIbkrConnected(false);
+          setIbkrAccount(null);
+        }
+      })
+      .catch(() => {
+        setIbkrConnected(false);
+      });
+  }, []);
+
+  const handleConnectIBKR = async () => {
+    setIbkrConnecting(true);
+    try {
+      const res = await ibkrApi.getAuthUrl();
+      if (res.data?.url) {
+        window.location.href = res.data.url;
+      }
+    } catch {
+      setIbkrConnecting(false);
+    }
+  };
+
+  const handleDisconnectIBKR = async () => {
+    setIbkrLoading(true);
+    try {
+      await ibkrApi.disconnect();
+      setIbkrConnected(false);
+      setIbkrAccount(null);
+    } catch {
+      // Best-effort
+    } finally {
+      setIbkrLoading(false);
+    }
+  };
 
   const sessions = [
     { id: '1', device: 'MacBook Pro — Chrome', location: 'Washington, DC', lastActive: 'Now', current: true },
@@ -522,15 +569,27 @@ function SecurityTab() {
               </div>
               <div>
                 <p className="text-sm font-medium text-off-white font-sans">Interactive Brokers LLC</p>
-                {ibkrConnected ? (
+                {ibkrConnected && ibkrAccount ? (
                   <>
                     <p className="text-xs text-off-white/40 font-sans mt-0.5">
-                      Account: <span className="font-mono text-off-white/60">U1289471</span>
+                      Account: <span className="font-mono text-off-white/60">{ibkrAccount.accountId}</span>
                     </p>
-                    <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-gain/10 border border-gain/20 rounded text-xs text-gain font-sans">
-                      <span className="w-1.5 h-1.5 rounded-full bg-gain inline-block" />
-                      Live Trading — Connected
-                    </span>
+                    <div className="flex items-center flex-wrap gap-2 mt-1">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gain/10 border border-gain/20 rounded text-xs text-gain font-sans">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gain inline-block" />
+                        Live Trading — Connected
+                      </span>
+                      <span className="text-xs text-off-white/40 font-sans">
+                        Buying Power: <span className="text-off-white/70 font-mono">
+                          ${ibkrAccount.buying_power.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </span>
+                      <span className="text-xs text-off-white/40 font-sans">
+                        Equity: <span className="text-off-white/70 font-mono">
+                          ${ibkrAccount.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </span>
+                    </div>
                   </>
                 ) : (
                   <p className="text-xs text-off-white/40 font-sans mt-0.5">Not connected — required to trade</p>
@@ -540,13 +599,23 @@ function SecurityTab() {
             {ibkrConnected ? (
               <button
                 onClick={() => setDisconnectModal(true)}
+                disabled={ibkrLoading}
                 className={btnDanger}
               >
+                {ibkrLoading && <Loader2 className="w-4 h-4 animate-spin" />}
                 Disconnect
               </button>
             ) : (
-              <button className={btnPrimary}>
-                <LinkIcon className="w-4 h-4" />
+              <button
+                onClick={handleConnectIBKR}
+                disabled={ibkrConnecting}
+                className={btnPrimary}
+              >
+                {ibkrConnecting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <LinkIcon className="w-4 h-4" />
+                )}
                 Connect IBKR Account
               </button>
             )}
@@ -559,7 +628,7 @@ function SecurityTab() {
         title="Disconnect Interactive Brokers Account?"
         message="This will remove your Interactive Brokers connection. You will not be able to place trades until you reconnect. Your positions and account history remain with Interactive Brokers."
         confirmLabel="Disconnect"
-        onConfirm={() => setIbkrConnected(false)}
+        onConfirm={handleDisconnectIBKR}
         onClose={() => setDisconnectModal(false)}
         danger
       />

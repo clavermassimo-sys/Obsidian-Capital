@@ -369,13 +369,15 @@ export default function Dashboard() {
     enabled: !!ibkrConnected,
   });
 
+  // accountData is now IBKRAccountResponse
   const account      = accountData?.account;
-  const equity       = toNum(account?.equity);
+  // IBKR shape uses net_liquidation as the equity value
+  const equity       = toNum(account?.equity ?? account?.net_liquidation);
   const buyingPower  = toNum(account?.buying_power);
   const cash         = toNum(account?.cash);
-  const lastEquity   = toNum(account?.last_equity);
-  const todayPnL     = equity > 0 && lastEquity > 0 ? equity - lastEquity : 0;
-  const todayPnLPct  = lastEquity > 0 ? (todayPnL / lastEquity) * 100 : 0;
+  const unrealizedPnL = toNum((account as { unrealized_pnl?: number } | null | undefined)?.unrealized_pnl);
+  const todayPnL     = unrealizedPnL;
+  const todayPnLPct  = equity > 0 && unrealizedPnL !== 0 ? (unrealizedPnL / (equity - unrealizedPnL)) * 100 : 0;
   const isGain       = todayPnL >= 0;
   const portfolioValue = equity > 0 ? equity : user?.portfolioValue ?? 0;
 

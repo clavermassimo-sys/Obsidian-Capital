@@ -8,6 +8,7 @@ import { polygonService } from '../services/polygon';
 import { stripeService } from '../services/stripe';
 import { getCommissionBreakdown } from '../middleware/commission';
 import { query, transaction } from '../config/database';
+import { io } from '../index';
 
 const router = Router();
 
@@ -18,9 +19,9 @@ router.use(authenticate);
 
 const orderSchema = Joi.object({
   ticker: Joi.string().trim().uppercase().min(1).max(10).required(),
-  company_name: Joi.string().trim().min(1).max(200).required(),
-  // conid is the IBKR contract ID — required for live orders
-  conid: Joi.number().integer().positive().required(),
+  company_name: Joi.string().trim().min(1).max(200).optional().allow(''),
+  // conid is the IBKR contract ID — optional; resolved server-side if missing/zero
+  conid: Joi.number().integer().min(0).optional().default(0),
   side: Joi.string().valid('BUY', 'SELL').required(),
   qty: Joi.number().positive().precision(6).max(1000000).required(),
   orderType: Joi.string()
@@ -107,7 +108,7 @@ router.post(
 
     const {
       ticker,
-      company_name,
+      company_name: companyNameRaw,
       conid,
       side,
       qty,
@@ -153,7 +154,19 @@ router.post(
       const ibkrAccountId = userRow.ibkr_account_id as string;
       const ibkrClient = new IBKRService(userRow.access_token as string);
 
-      // ─── 2. Calculate commission on subtotal ─────────────────────────────────
+      // ─── 2. Resolve IBKR contract ID if not provided ────────────────────────
+      let resolvedConid: number = conid ?? 0;
+      if (!resolvedConid) {
+        try {
+          const contracts = await ibkrClient.searchContracts(ticker);
+          const match = contracts.find((c) => c.symbol === ticker) || contracts[0];
+          if (match) resolvedConid = match.conid;
+        } catch {
+          // If conid lookup fails, send order without conid (IBKR may reject — that's OK)
+        }
+      }
+
+      // ─── 3. Calculate commission on subtotal ─────────────────────────────────
       let subtotal: number;
       if (estimatedPrice) {
         subtotal = parseFloat((qty * estimatedPrice).toFixed(2));
@@ -170,10 +183,10 @@ router.post(
 
       const commission = getCommissionBreakdown(subtotal, tier);
 
-      // ─── 3. Submit order to IBKR ─────────────────────────────────────────────
+      // ─── 4. Submit order to IBKR ─────────────────────────────────────────────
       const ibkrOrder = await ibkrClient.placeOrder({
         acctId: ibkrAccountId,
-        conid,
+        conid: resolvedConid,
         side: side as 'BUY' | 'SELL',
         orderType: orderType as 'MKT' | 'LMT' | 'STP' | 'STP LMT' | 'TRAIL',
         quantity: qty,
@@ -183,7 +196,7 @@ router.post(
         ...(trailingPercent !== undefined && { trailingPercent }),
       });
 
-      // ─── 4. Record trade + commission in DB ──────────────────────────────────
+      // ─── 5. Record trade + commission in DB ──────────────────────────────────
       const tradeId = uuidv4();
       const filledPrice = ibkrOrder.avgFillPrice ?? (price ?? null);
       const filledQty = ibkrOrder.filledQuantity > 0 ? ibkrOrder.filledQuantity : qty;
@@ -211,7 +224,7 @@ router.post(
             tradeId,
             userId,
             ticker,
-            company_name,
+            companyNameRaw || ticker,
             side.toLowerCase() === 'buy' ? 'buy' : 'sell',
             filledQty,
             filledPrice ?? 0,
@@ -238,7 +251,7 @@ router.post(
         );
       });
 
-      // ─── 5. Charge Stripe commission if customer has payment method ──────────
+      // ─── 6. Charge Stripe commission if customer has payment method ──────────
       let stripePaymentIntent: string | null = null;
       if (stripeCustomerId && finalCommission.amount > 0) {
         try {
@@ -275,7 +288,22 @@ router.post(
         }
       }
 
-      // ─── 6. Return response ──────────────────────────────────────────────────
+      // ─── 7. Emit real-time order update via Socket.IO ────────────────────────
+      const orderUpdatePayload = {
+        trade_id:   tradeId,
+        ibkr_order_id: ibkrOrder.orderId,
+        ticker,
+        side,
+        qty:        filledQty,
+        price:      filledPrice,
+        status:     tradeStatus,
+        commission: finalCommission.amount,
+        total:      finalCommission.total,
+        created_at: new Date().toISOString(),
+      };
+      io.to(`user:${userId}`).emit('order:update', orderUpdatePayload);
+
+      // ─── 8. Return response ──────────────────────────────────────────────────
       res.status(201).json({
         success: true,
         message: `${side === 'BUY' ? 'Purchase' : 'Sale'} order submitted successfully.`,
@@ -323,10 +351,11 @@ router.post(
 );
 
 // ─── GET /trades/orders ───────────────────────────────────────────────────────
-// Order history from our DB, optionally enriched with live IBKR status
+// Order history from our DB merged with live IBKR open orders
 
 router.get('/orders', async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.user!.userId;
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
     const offset = (page - 1) * limit;
@@ -334,7 +363,7 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
     const type = req.query.type as string | undefined;
 
     let whereClause = 'WHERE t.user_id = $1';
-    const params: (string | number)[] = [req.user!.userId];
+    const params: (string | number)[] = [userId];
     let paramIndex = 2;
 
     if (ticker) {
@@ -368,6 +397,26 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
       ),
     ]);
 
+    // Attempt to fetch live IBKR open orders and merge status
+    const connResult = await query(
+      `SELECT ic.access_token, ic.account_id FROM ibkr_connections ic WHERE ic.user_id = $1`,
+      [userId]
+    );
+
+    let ibkrOrderMap: Map<string, string> = new Map();
+    if (connResult.rows.length > 0 && connResult.rows[0].access_token) {
+      try {
+        const ibkrClient = new IBKRService(connResult.rows[0].access_token as string);
+        const liveOrders = await ibkrClient.getOrders(connResult.rows[0].account_id as string);
+        // Build a map: ibkr orderId -> status for live enrichment
+        for (const o of liveOrders) {
+          if (o.orderId) ibkrOrderMap.set(o.orderId, o.status);
+        }
+      } catch {
+        // Non-fatal — fall back to DB status
+      }
+    }
+
     const total = parseInt(countResult.rows[0].total);
     const totalPages = Math.ceil(total / limit);
 
@@ -380,6 +429,8 @@ router.get('/orders', async (req: Request, res: Response): Promise<void> => {
           price: parseFloat(t.price),
           commission: parseFloat(t.commission),
           total: parseFloat(t.total),
+          // If this trade has a matching IBKR order, surface its live status
+          ibkr_status: ibkrOrderMap.get(t.ibkr_order_id as string) ?? null,
         })),
         pagination: {
           page,
@@ -654,7 +705,7 @@ router.get('/ibkr/callback', async (req: Request, res: Response): Promise<void> 
     const primaryAccount = accounts[0];
     const accountId = primaryAccount?.accountId || '';
 
-    const tokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+    const tokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
     await query(
       `INSERT INTO ibkr_connections (
@@ -690,6 +741,84 @@ router.get('/ibkr/callback', async (req: Request, res: Response): Promise<void> 
     const e = err as Error;
     console.error('[Trades] IBKR callback error:', e.message);
     res.redirect(`${frontendUrl}/settings/brokerage?error=oauth_failed`);
+  }
+});
+
+// ─── GET /trades/ibkr/account ─────────────────────────────────────────────────
+// IBKR account list + summary for the connected user
+
+router.get('/ibkr/account', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.userId;
+
+    const connResult = await query(
+      `SELECT ic.access_token, ic.account_id, ic.paper_mode
+       FROM ibkr_connections ic WHERE ic.user_id = $1`,
+      [userId]
+    );
+
+    if (connResult.rows.length === 0 || !connResult.rows[0].access_token) {
+      res.json({
+        success: true,
+        data: { account: null, ibkr_connected: false },
+        message: 'No Interactive Brokers account connected.',
+      });
+      return;
+    }
+
+    const { access_token, account_id, paper_mode } = connResult.rows[0];
+    const ibkrClient = new IBKRService(access_token as string);
+
+    // Fetch list then summary for the primary account
+    let resolvedAccountId: string = account_id as string;
+    try {
+      const accounts = await ibkrClient.getAccounts();
+      if (accounts.length > 0 && !resolvedAccountId) {
+        resolvedAccountId = accounts[0].accountId;
+      }
+    } catch {
+      // Best-effort — fall back to stored account_id
+    }
+
+    const summary = await ibkrClient.getAccountSummary(resolvedAccountId);
+
+    res.json({
+      success: true,
+      data: {
+        account: {
+          accountId:       summary.accountId,
+          accountType:     summary.accountType,
+          currency:        summary.currency,
+          buying_power:    summary.availableFunds,
+          equity:          summary.netLiquidation,
+          cash:            summary.totalCashValue,
+          net_liquidation: summary.netLiquidation,
+          unrealized_pnl:  summary.unrealizedPnL,
+          realized_pnl:    summary.realizedPnL,
+        },
+        paper_mode: paper_mode ?? false,
+        ibkr_connected: true,
+      },
+    });
+  } catch (err) {
+    const e = err as Error;
+    console.error('[Trades] IBKR account error:', e.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch IBKR account.' });
+  }
+});
+
+// ─── POST /trades/ibkr/disconnect ────────────────────────────────────────────
+// Remove the user's IBKR connection
+
+router.post('/ibkr/disconnect', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.userId;
+    await query(`DELETE FROM ibkr_connections WHERE user_id = $1`, [userId]);
+    await query(`UPDATE users SET ibkr_connected = false, ibkr_account_id = NULL WHERE id = $1`, [userId]);
+    res.json({ success: true, message: 'Interactive Brokers account disconnected.' });
+  } catch (err) {
+    console.error('[Trades] IBKR disconnect error:', err);
+    res.status(500).json({ success: false, error: 'Failed to disconnect IBKR account.' });
   }
 });
 

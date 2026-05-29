@@ -186,8 +186,18 @@ export interface PreviewParams {
   time_in_force?: string;
 }
 
-export interface PlaceOrderParams extends PreviewParams {
-  // same shape as preview
+export interface PlaceOrderParams {
+  ticker: string;
+  company_name?: string;
+  conid?: number;
+  side: 'BUY' | 'SELL';
+  qty: number;
+  orderType?: string;
+  tif?: string;
+  price?: number;
+  auxPrice?: number;
+  trailingPercent?: number;
+  estimatedPrice?: number;
 }
 
 // ── Market API ────────────────────────────────────────────────
@@ -234,8 +244,9 @@ export const tradesApi = {
   getOrders: () =>
     api.get<OrdersResponse>('/trades/orders').then((r) => r.data),
 
+  /** Returns the IBKR account summary (buying power, equity, etc.) */
   getAccount: () =>
-    api.get<AccountResponse>('/trades/account').then((r) => r.data),
+    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/ibkr/account').then((r) => r.data.data),
 
   previewOrder: (params: PreviewParams) =>
     api.post('/trades/preview', params).then((r) => r.data),
@@ -244,12 +255,44 @@ export const tradesApi = {
     api.post('/trades/order', params).then((r) => r.data),
 };
 
+// ── Account data shape from IBKR ──────────────────────────────
+
+export interface IBKRAccountData {
+  accountId:       string;
+  accountType:     string;
+  currency:        string;
+  buying_power:    number;
+  equity:          number;
+  cash:            number;
+  net_liquidation: number;
+  unrealized_pnl:  number;
+  realized_pnl:    number;
+}
+
+export interface IBKRAccountResponse {
+  account:       IBKRAccountData | null;
+  ibkr_connected: boolean;
+  paper_mode?:   boolean;
+}
+
 // ── IBKR API ──────────────────────────────────────────────────
 
 export const ibkrApi = {
-  connect: () => api.get<{ authUrl: string }>('/trades/ibkr/connect'),
-  getStatus: () => api.get<{ connected: boolean; accountId?: string; paperMode: boolean }>('/trades/ibkr/status'),
-  disconnect: () => api.post('/trades/ibkr/disconnect'),
-  getMode: () => api.get<{ paperMode: boolean }>('/trades/mode'),
-  setMode: (paperMode: boolean) => api.post('/trades/mode', { paperMode }),
+  /** Get the IBKR OAuth authorization URL from the backend */
+  getAuthUrl: () =>
+    api.get<{ success: boolean; data: { url: string; state: string } }>('/trades/ibkr/auth-url').then((r) => r.data),
+
+  /** Fetch the connected IBKR account summary */
+  getAccount: () =>
+    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/ibkr/account').then((r) => r.data),
+
+  /** Disconnect the user's IBKR account */
+  disconnect: () =>
+    api.post<{ success: boolean; message: string }>('/trades/ibkr/disconnect').then((r) => r.data),
+
+  getMode: () =>
+    api.get<{ paperMode: boolean }>('/trades/mode').then((r) => r.data),
+
+  setMode: (paperMode: boolean) =>
+    api.post('/trades/mode', { paperMode }).then((r) => r.data),
 };

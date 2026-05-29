@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate, requireKyc } from '../middleware/auth';
+import { IBKRService } from '../services/ibkr';
 
 const router = Router();
 
@@ -8,53 +9,65 @@ const router = Router();
 router.use(authenticate);
 
 // ─── GET /portfolio/holdings ──────────────────────────────────────────────────
-// Returns all current stock holdings for the authenticated user
+// If user has IBKR connected, fetch live positions; otherwise return empty
 
 router.get('/holdings', async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await query(
-      `SELECT
-         h.id,
-         h.ticker,
-         h.company_name,
-         h.shares,
-         h.avg_cost,
-         ROUND((h.shares * h.avg_cost)::numeric, 2) AS cost_basis
-       FROM holdings h
-       WHERE h.user_id = $1
-       ORDER BY (h.shares * h.avg_cost) DESC`,
-      [req.user!.userId]
+    const userId = req.user!.userId;
+
+    // Look up IBKR connection
+    const connResult = await query(
+      `SELECT ic.access_token, ic.account_id
+       FROM ibkr_connections ic
+       WHERE ic.user_id = $1`,
+      [userId]
     );
 
-    // Enrich with mock current prices (in production, fetch from market data API)
-    const holdings = result.rows.map((h) => {
-      const mockPriceVariance = 1 + (Math.random() * 0.2 - 0.1); // ±10% variance
-      const currentPrice = parseFloat((h.avg_cost * mockPriceVariance).toFixed(2));
-      const marketValue = parseFloat((h.shares * currentPrice).toFixed(2));
-      const costBasis = parseFloat(h.cost_basis);
-      const gainLoss = parseFloat((marketValue - costBasis).toFixed(2));
-      const gainLossPct = parseFloat(((gainLoss / costBasis) * 100).toFixed(2));
+    if (connResult.rows.length === 0 || !connResult.rows[0].access_token) {
+      // No IBKR connection — return empty holdings
+      res.json({
+        success: true,
+        data: { holdings: [], count: 0 },
+        message: 'No Interactive Brokers account connected.',
+      });
+      return;
+    }
 
-      return {
-        id: h.id,
-        ticker: h.ticker,
-        company_name: h.company_name,
-        shares: parseFloat(h.shares),
-        avg_cost: parseFloat(h.avg_cost),
-        current_price: currentPrice,
-        cost_basis: costBasis,
-        market_value: marketValue,
-        gain_loss: gainLoss,
-        gain_loss_pct: gainLossPct,
-      };
-    });
+    const { access_token, account_id } = connResult.rows[0];
+    const ibkrClient = new IBKRService(access_token as string);
+    const positions = await ibkrClient.getPositions(account_id as string);
+
+    // Transform IBKR IBKRPosition → Holding shape
+    const holdings = positions
+      .filter((p) => p.position !== 0)
+      .map((p) => {
+        const costBasis = parseFloat((p.position * p.avgCost).toFixed(2));
+        const returnDollar = p.unrealizedPnl;
+        const returnPct =
+          costBasis > 0
+            ? parseFloat(((returnDollar / costBasis) * 100).toFixed(2))
+            : 0;
+        return {
+          // Frontend HoldingRaw shape
+          symbol:           p.contractDesc,
+          qty:              p.position,
+          avg_entry_price:  p.avgCost,
+          current_price:    p.mktPrice,
+          market_value:     p.mktValue,
+          unrealized_pl:    p.unrealizedPnl,
+          unrealized_plpc:  returnPct / 100,
+          // Extra context
+          conid:            p.conid,
+          acct_id:          p.acctId,
+          cost_basis:       costBasis,
+          gain_loss:        returnDollar,
+          gain_loss_pct:    returnPct,
+        };
+      });
 
     res.json({
       success: true,
-      data: {
-        holdings,
-        count: holdings.length,
-      },
+      data: { holdings, count: holdings.length },
     });
   } catch (err) {
     console.error('[Portfolio] Holdings error:', err);
@@ -151,92 +164,72 @@ router.get('/portfolio-value', requireKyc, async (req: Request, res: Response): 
 });
 
 // ─── GET /portfolio/portfolio-history ─────────────────────────────────────────
-// Returns historical portfolio performance data points (30/90/365 days)
+// Try IBKR GET /portfolio/{accountId}/performance; fallback to empty if unavailable
 
 router.get('/portfolio-history', requireKyc, async (req: Request, res: Response): Promise<void> => {
   try {
+    const userId = req.user!.userId;
     const period = (req.query.period as string) || '30d';
-    const validPeriods: Record<string, number> = {
-      '7d': 7,
-      '30d': 30,
-      '90d': 90,
-      '1y': 365,
-    };
 
-    const days = validPeriods[period] ?? 30;
-
-    // Get completed trades within period for the user
-    const tradesResult = await query(
-      `SELECT
-         DATE(created_at) AS trade_date,
-         type,
-         shares,
-         price,
-         total,
-         ticker
-       FROM trades
-       WHERE user_id = $1
-         AND status = 'completed'
-         AND created_at >= NOW() - INTERVAL '${days} days'
-       ORDER BY created_at ASC`,
-      [req.user!.userId]
+    // Try IBKR performance data first
+    const connResult = await query(
+      `SELECT ic.access_token, ic.account_id FROM ibkr_connections ic WHERE ic.user_id = $1`,
+      [userId]
     );
 
-    // Get current holdings cost basis as baseline
-    const holdingsResult = await query(
-      `SELECT SUM(shares * avg_cost) AS total_cost_basis FROM holdings WHERE user_id = $1`,
-      [req.user!.userId]
-    );
+    if (connResult.rows.length > 0 && connResult.rows[0].access_token) {
+      try {
+        const { access_token, account_id } = connResult.rows[0];
+        const ibkrClient = new IBKRService(access_token as string);
 
-    const baseCostBasis = parseFloat(holdingsResult.rows[0]?.total_cost_basis || '0');
+        // IBKR endpoint: GET /portfolio/{accountId}/performance
+        // Returns { id, nav: [{date, value}], cps, pm, ... }
+        const perfData = await ibkrClient['client'].get<{
+          nav?: Array<{ date: string; val: number }>;
+          id?: string;
+        }>(`/portfolio/${encodeURIComponent(account_id as string)}/performance`);
 
-    // Build synthetic daily portfolio value snapshots
-    const dataPoints: { date: string; value: number; change_pct: number }[] = [];
-    const startValue = baseCostBasis > 0 ? baseCostBasis * 0.9 : 10000;
+        const navPoints = perfData.data?.nav ?? [];
+        if (navPoints.length > 0) {
+          const dataPoints = navPoints.map((pt, i, arr) => {
+            const prevVal = i > 0 ? arr[i - 1].val : pt.val;
+            const changePct = prevVal > 0
+              ? parseFloat((((pt.val - prevVal) / prevVal) * 100).toFixed(2))
+              : 0;
+            return { date: pt.date, value: pt.val, change_pct: changePct };
+          });
 
-    for (let i = days; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
+          const firstValue = dataPoints[0]?.value ?? 0;
+          const lastValue  = dataPoints[dataPoints.length - 1]?.value ?? 0;
+          const totalReturn = parseFloat((lastValue - firstValue).toFixed(2));
+          const totalReturnPct = firstValue > 0
+            ? parseFloat(((totalReturn / firstValue) * 100).toFixed(2))
+            : 0;
 
-      // Simulate realistic price movement (random walk)
-      const dayVariance = 1 + (Math.random() * 0.04 - 0.02); // ±2% daily
-      const progressFactor = (days - i) / days;
-      const trendFactor = 1 + progressFactor * 0.08; // ~8% trend over period
-      const value = parseFloat((startValue * trendFactor * dayVariance).toFixed(2));
-
-      const changePct =
-        dataPoints.length > 0
-          ? parseFloat(
-              (((value - dataPoints[dataPoints.length - 1].value) /
-                dataPoints[dataPoints.length - 1].value) *
-                100).toFixed(2)
-            )
-          : 0;
-
-      dataPoints.push({ date: dateStr, value, change_pct: changePct });
+          res.json({
+            success: true,
+            data: {
+              period,
+              data_points: dataPoints,
+              summary: { start_value: firstValue, end_value: lastValue, total_return: totalReturn, total_return_pct: totalReturnPct },
+              source: 'ibkr',
+            },
+          });
+          return;
+        }
+      } catch {
+        // Fall through to empty response
+      }
     }
 
-    const firstValue = dataPoints[0]?.value ?? 0;
-    const lastValue = dataPoints[dataPoints.length - 1]?.value ?? 0;
-    const totalReturn = parseFloat((lastValue - firstValue).toFixed(2));
-    const totalReturnPct =
-      firstValue > 0
-        ? parseFloat(((totalReturn / firstValue) * 100).toFixed(2))
-        : 0;
-
+    // No IBKR data — return empty
     res.json({
       success: true,
       data: {
         period,
-        data_points: dataPoints,
-        summary: {
-          start_value: firstValue,
-          end_value: lastValue,
-          total_return: totalReturn,
-          total_return_pct: totalReturnPct,
-          trades_in_period: tradesResult.rows.length,
-        },
+        data_points: [],
+        summary: { start_value: 0, end_value: 0, total_return: 0, total_return_pct: 0 },
+        source: 'none',
       },
     });
   } catch (err) {

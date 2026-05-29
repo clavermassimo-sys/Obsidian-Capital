@@ -5,6 +5,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import jwt from 'jsonwebtoken';
+
+import { IBKRService } from './services/ibkr';
+import { polygonService } from './services/polygon';
+import { query as dbQuery } from './config/database';
 
 import { apiLimiter } from './middleware/rateLimit';
 import authRouter from './routes/auth';
@@ -175,97 +180,81 @@ const io = new SocketIOServer(httpServer, {
 // Track connected clients count
 let connectedClients = 0;
 
-// Simulated real-time price data — base prices for market simulation
-const LIVE_TICKERS: Record<string, { name: string; price: number; trend: number }> = {
-  AAPL:  { name: 'Apple Inc.',              price: 189.30, trend:  0.0002 },
-  MSFT:  { name: 'Microsoft Corporation',   price: 415.60, trend:  0.0003 },
-  GOOGL: { name: 'Alphabet Inc.',           price: 175.20, trend:  0.0001 },
-  AMZN:  { name: 'Amazon.com Inc.',         price: 186.40, trend:  0.0002 },
-  NVDA:  { name: 'NVIDIA Corporation',      price: 875.90, trend:  0.0005 },
-  TSLA:  { name: 'Tesla Inc.',              price: 245.80, trend: -0.0001 },
-  META:  { name: 'Meta Platforms Inc.',     price: 515.30, trend:  0.0003 },
-  JPM:   { name: 'JPMorgan Chase & Co.',    price: 202.40, trend:  0.0001 },
-  V:     { name: 'Visa Inc.',               price: 274.60, trend:  0.0001 },
-  SPX:   { name: 'S&P 500 Index',           price: 5218.30, trend: 0.0002 },
-};
+// Core tickers to poll from Polygon.io for real-time price updates
+const CORE_TICKERS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'JPM', 'V', 'SPY'];
 
-// Store current prices to calculate deltas
-const currentPrices: Record<string, number> = {};
-for (const [ticker, data] of Object.entries(LIVE_TICKERS)) {
-  currentPrices[ticker] = data.price;
-}
+// Cache of last known prices (used to compute tick_change)
+const lastPriceCache: Record<string, number> = {};
 
 /**
- * Generate a realistic next tick price using a mean-reverting random walk.
- * Applies the ticker's trend bias plus Gaussian-approximated noise.
- */
-const nextPrice = (ticker: string): number => {
-  const data = LIVE_TICKERS[ticker];
-  const prev = currentPrices[ticker];
-
-  // Box-Muller transform for Gaussian noise
-  const u1 = Math.random();
-  const u2 = Math.random();
-  const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-
-  const volatility = 0.0008; // ~0.08% per tick
-  const noise = gaussian * volatility;
-  const meanReversion = (data.price - prev) * 0.001; // soft pull toward base
-
-  const newPrice = parseFloat((prev * (1 + data.trend + noise + meanReversion)).toFixed(2));
-  currentPrices[ticker] = newPrice;
-  return newPrice;
-};
-
-/**
- * Broadcast price updates to all connected clients every 2 seconds.
- * Only broadcasts when at least one client is connected.
+ * Fetch real quotes from Polygon.io and broadcast to all connected clients.
+ * Runs every 15 seconds — Polygon free tier allows ~5 calls/min.
  */
 const startPriceBroadcaster = () => {
-  setInterval(() => {
+  const broadcast = async () => {
     if (connectedClients === 0) return;
 
-    const updates = Object.keys(LIVE_TICKERS).map((ticker) => {
-      const prev = currentPrices[ticker];
-      const price = nextPrice(ticker);
-      const change = parseFloat((price - LIVE_TICKERS[ticker].price).toFixed(2));
-      const changePct = parseFloat(((change / LIVE_TICKERS[ticker].price) * 100).toFixed(2));
-      const prevChange = parseFloat((price - prev).toFixed(2));
+    const results = await Promise.allSettled(
+      CORE_TICKERS.map((ticker) => polygonService.getQuote(ticker))
+    );
 
-      return {
-        ticker,
-        name: LIVE_TICKERS[ticker].name,
-        price,
-        change,
-        change_pct: changePct,
-        tick_change: prevChange,
-        volume: Math.floor(Math.random() * 5000 + 1000),
-        timestamp: Date.now(),
-      };
-    });
+    const updates = results
+      .map((r, i) => {
+        if (r.status !== 'fulfilled') return null;
+        const q = r.value;
+        const ticker = CORE_TICKERS[i];
+        const prev = lastPriceCache[ticker] ?? q.price;
+        lastPriceCache[ticker] = q.price;
+        return {
+          ticker,
+          name: ticker,
+          price: q.price,
+          change: q.change,
+          change_pct: q.changePct,
+          tick_change: parseFloat((q.price - prev).toFixed(4)),
+          volume: q.volume ?? 0,
+          timestamp: Date.now(),
+        };
+      })
+      .filter((u): u is NonNullable<typeof u> => u !== null);
 
-    io.emit('price:update', { updates, server_time: Date.now() });
-  }, 2000);
+    if (updates.length > 0) {
+      io.emit('price:update', { updates, server_time: Date.now() });
+    }
+  };
+
+  // Initial fetch immediately, then every 15 seconds
+  broadcast().catch(() => undefined);
+  setInterval(() => { broadcast().catch(() => undefined); }, 15_000);
 };
 
-// Broadcast index summary every 5 seconds
+/**
+ * Broadcast real index data from Polygon.io every 30 seconds.
+ */
 const startIndexBroadcaster = () => {
-  setInterval(() => {
+  const broadcast = async () => {
     if (connectedClients === 0) return;
+    try {
+      const indices = await polygonService.getIndices();
+      if (indices.length > 0) {
+        io.emit('index:update', {
+          indices: indices.map((idx: { symbol: string; name: string; price: number; change: number; changePct: number }) => ({
+            symbol:     idx.symbol,
+            name:       idx.name,
+            value:      idx.price,
+            change:     idx.change,
+            change_pct: idx.changePct,
+          })),
+          timestamp: Date.now(),
+        });
+      }
+    } catch {
+      // Non-fatal — skip this tick
+    }
+  };
 
-    const spxPrice = currentPrices['SPX'] || 5218.30;
-    const spxChange = parseFloat((spxPrice - 5218.30).toFixed(2));
-    const spxChangePct = parseFloat(((spxChange / 5218.30) * 100).toFixed(2));
-
-    io.emit('index:update', {
-      indices: [
-        { symbol: 'SPX', name: 'S&P 500', value: spxPrice, change: spxChange, change_pct: spxChangePct },
-        { symbol: 'DJI', name: 'Dow Jones', value: 39127.8 + (Math.random() * 100 - 50), change: 0, change_pct: 0 },
-        { symbol: 'COMP', name: 'NASDAQ', value: 16340.5 + (Math.random() * 80 - 40), change: 0, change_pct: 0 },
-      ],
-      timestamp: Date.now(),
-    });
-  }, 5000);
+  broadcast().catch(() => undefined);
+  setInterval(() => { broadcast().catch(() => undefined); }, 30_000);
 };
 
 // ─── Socket.IO Connection Handlers ───────────────────────────────────────────
@@ -274,19 +263,34 @@ io.on('connection', (socket: Socket) => {
   connectedClients++;
   console.log(`[WS] Client connected: ${socket.id} | Total: ${connectedClients}`);
 
-  // Send initial price snapshot on connect
-  const snapshot = Object.keys(LIVE_TICKERS).map((ticker) => ({
+  // Send initial price snapshot from cache (populated by broadcaster) or skip
+  const snapshot = Object.entries(lastPriceCache).map(([ticker, price]) => ({
     ticker,
-    name: LIVE_TICKERS[ticker].name,
-    price: currentPrices[ticker],
-    change: parseFloat((currentPrices[ticker] - LIVE_TICKERS[ticker].price).toFixed(2)),
-    change_pct: parseFloat(
-      (((currentPrices[ticker] - LIVE_TICKERS[ticker].price) / LIVE_TICKERS[ticker].price) * 100).toFixed(2)
-    ),
+    name: ticker,
+    price,
+    change: 0,
+    change_pct: 0,
     timestamp: Date.now(),
   }));
 
-  socket.emit('price:snapshot', { updates: snapshot, server_time: Date.now() });
+  if (snapshot.length > 0) {
+    socket.emit('price:snapshot', { updates: snapshot, server_time: Date.now() });
+  }
+
+  // ── Authenticated room join ──────────────────────────────────────────────────
+  // Clients send { token } after connecting so we can place them in user:{userId}
+  socket.on('auth', (data: { token?: string }) => {
+    if (!data?.token) return;
+    try {
+      const decoded = jwt.verify(data.token, process.env.JWT_SECRET || 'obsidian_secret_key_change_in_production') as { userId: string };
+      if (decoded?.userId) {
+        socket.join(`user:${decoded.userId}`);
+        console.log(`[WS] ${socket.id} joined room user:${decoded.userId}`);
+      }
+    } catch {
+      // Invalid token — ignore
+    }
+  });
 
   // Allow clients to subscribe to specific tickers
   socket.on('subscribe:ticker', (data: { tickers: string[] }) => {
@@ -317,6 +321,30 @@ io.on('connection', (socket: Socket) => {
     console.error(`[WS] Socket error (${socket.id}):`, err.message);
   });
 });
+
+// ─── IBKR Session Keepalive ───────────────────────────────────────────────────
+// Ping every connected IBKR session every 60 seconds to prevent token expiry.
+
+setInterval(async () => {
+  try {
+    const result = await dbQuery(
+      `SELECT user_id, access_token FROM ibkr_connections WHERE access_token IS NOT NULL`
+    );
+    for (const row of result.rows) {
+      try {
+        const svc = new IBKRService(row.access_token as string);
+        const alive = await svc.ping();
+        if (!alive) {
+          console.warn(`[IBKR] Keepalive failed for user ${row.user_id as string}`);
+        }
+      } catch {
+        // Non-fatal — token may have expired
+      }
+    }
+  } catch {
+    // DB unavailable — skip this tick
+  }
+}, 60_000);
 
 // Start broadcasters
 startPriceBroadcaster();
