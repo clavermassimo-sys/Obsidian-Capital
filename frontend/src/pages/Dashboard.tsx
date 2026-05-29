@@ -353,7 +353,7 @@ function UpgradePromptBanner({ tier, monthlyVolume }: { tier: string; monthlyVol
 // ── Dashboard ─────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { user, ibkrConnected } = useAuth();
+  const { user, alpacaConnected } = useAuth();
   const { holdings } = useTrading();
 
   const marketStatus = getMarketStatus();
@@ -366,12 +366,12 @@ export default function Dashboard() {
     queryKey: ['account'],
     queryFn: () => tradesApi.getAccount(),
     staleTime: 60_000,
-    enabled: !!ibkrConnected,
+    enabled: !!alpacaConnected,
   });
 
-  // accountData is now IBKRAccountResponse
+  // accountData comes from /trades/account (Alpaca Broker API)
   const account      = accountData?.account;
-  // IBKR shape uses net_liquidation as the equity value
+  // Alpaca uses equity; net_liquidation kept as fallback for legacy shapes
   const equity       = toNum(account?.equity ?? account?.net_liquidation);
   const buyingPower  = toNum(account?.buying_power);
   const cash         = toNum(account?.cash);
@@ -423,8 +423,8 @@ export default function Dashboard() {
             </div>
           </motion.div>
 
-          {/* ── IBKR Connect Banner ─────────────────────────── */}
-          {!ibkrConnected && (
+          {/* ── Account activation banner ─────────────────── */}
+          {!alpacaConnected && (
             <motion.div variants={item}>
               <AlpacaConnectBanner />
             </motion.div>
@@ -442,17 +442,11 @@ export default function Dashboard() {
           <motion.div variants={container} className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
             {accountLoading ? (
               [1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)
-            ) : !ibkrConnected || !account ? (
+            ) : !alpacaConnected || !account ? (
               <motion.div variants={item} className="card p-5 col-span-full flex items-center justify-center gap-3 py-8">
                 <p className="text-sm font-sans text-off-white/40">
-                  Connect your Interactive Brokers account to see live portfolio data
+                  Your brokerage account is being activated. Portfolio data will appear once setup is complete.
                 </p>
-                <Link
-                  to="/settings/billing"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gold text-obsidian text-xs font-bold hover:brightness-110 transition-all"
-                >
-                  Connect <ExternalLink size={12} />
-                </Link>
               </motion.div>
             ) : (
               <>

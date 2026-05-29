@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { PageContent, PageHeader } from '@/components/layout/AppLayout';
-import { ibkrApi } from '@/services/api';
+import { brokerApi } from '@/services/api';
 import type { IBKRAccountData } from '@/services/api';
 
 // ── Shared Styles ─────────────────────────────────────────────
@@ -305,53 +305,28 @@ function SecurityTab() {
   const [twoFAEnabled, setTwoFAEnabled] = useState(false);
   const [changingPw, setChangingPw]   = useState(false);
   const [pwSuccess, setPwSuccess]     = useState(false);
-  const [ibkrConnected, setIbkrConnected] = useState(false);
-  const [ibkrAccount, setIbkrAccount]     = useState<IBKRAccountData | null>(null);
-  const [ibkrLoading, setIbkrLoading]     = useState(false);
-  const [ibkrConnecting, setIbkrConnecting] = useState(false);
-  const [disconnectModal, setDisconnectModal] = useState(false);
+  const [alpacaAccount, setAlpacaAccount] = useState<IBKRAccountData | null>(null);
+  const [alpacaLoading, setAlpacaLoading] = useState(true);
 
-  // Fetch IBKR connection status on mount
+  // Fetch Alpaca Broker account status on mount
   useEffect(() => {
-    ibkrApi.getAccount()
+    brokerApi.getAccount()
       .then((res) => {
-        if (res.data.ibkr_connected && res.data.account) {
-          setIbkrConnected(true);
-          setIbkrAccount(res.data.account);
+        if ((res.data.alpaca_connected || res.data.ibkr_connected) && res.data.account) {
+          setAlpacaAccount(res.data.account);
         } else {
-          setIbkrConnected(false);
-          setIbkrAccount(null);
+          setAlpacaAccount(null);
         }
       })
       .catch(() => {
-        setIbkrConnected(false);
-      });
+        setAlpacaAccount(null);
+      })
+      .finally(() => setAlpacaLoading(false));
   }, []);
 
-  const handleConnectIBKR = async () => {
-    setIbkrConnecting(true);
-    try {
-      const res = await ibkrApi.getAuthUrl();
-      if (res.data?.url) {
-        window.location.href = res.data.url;
-      }
-    } catch {
-      setIbkrConnecting(false);
-    }
-  };
-
-  const handleDisconnectIBKR = async () => {
-    setIbkrLoading(true);
-    try {
-      await ibkrApi.disconnect();
-      setIbkrConnected(false);
-      setIbkrAccount(null);
-    } catch {
-      // Best-effort
-    } finally {
-      setIbkrLoading(false);
-    }
-  };
+  const alpacaConnected = !!alpacaAccount;
+  const alpacaStatus    = (alpacaAccount as IBKRAccountData & { status?: string } | null)?.status ?? 'ONBOARDING';
+  const alpacaIsActive  = alpacaStatus === 'ACTIVE';
 
   const sessions = [
     { id: '1', device: 'MacBook Pro — Chrome', location: 'Washington, DC', lastActive: 'Now', current: true },
@@ -552,86 +527,78 @@ function SecurityTab() {
         </button>
       </div>
 
-      {/* Connected Apps — Interactive Brokers */}
+      {/* Brokerage Account Status */}
       <div className="border-t border-border pt-6">
-        <h3 className="font-serif text-lg text-off-white mb-1">Interactive Brokers Connection</h3>
+        <h3 className="font-serif text-lg text-off-white mb-1">Brokerage Account</h3>
         <p className="text-sm text-off-white/50 font-sans mb-4">
-          Required to execute trades. Your funds are held at Interactive Brokers LLC, member FINRA/SIPC.
+          Your trading account is held securely with our regulated brokerage partner. No connection required — your account is set up automatically.
         </p>
         <div className="bg-surface-2 border border-border rounded-xl p-5">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-lg bg-[#003087] border border-[#003087]/60 flex items-center justify-center flex-shrink-0">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                  <rect width="24" height="24" rx="4" fill="#003087" />
-                  <text x="12" y="17" textAnchor="middle" fontSize="12" fontWeight="bold" fill="#FFFFFF">IB</text>
-                </svg>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-off-white font-sans">Interactive Brokers LLC</p>
-                {ibkrConnected && ibkrAccount ? (
-                  <>
-                    <p className="text-xs text-off-white/40 font-sans mt-0.5">
-                      Account: <span className="font-mono text-off-white/60">{ibkrAccount.accountId}</span>
-                    </p>
-                    <div className="flex items-center flex-wrap gap-2 mt-1">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gain/10 border border-gain/20 rounded text-xs text-gain font-sans">
-                        <span className="w-1.5 h-1.5 rounded-full bg-gain inline-block" />
-                        Live Trading — Connected
-                      </span>
-                      <span className="text-xs text-off-white/40 font-sans">
-                        Buying Power: <span className="text-off-white/70 font-mono">
-                          ${ibkrAccount.buying_power.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </span>
-                      <span className="text-xs text-off-white/40 font-sans">
-                        Equity: <span className="text-off-white/70 font-mono">
-                          ${ibkrAccount.equity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-off-white/40 font-sans mt-0.5">Not connected — required to trade</p>
-                )}
-              </div>
+          {alpacaLoading ? (
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-4 h-4 animate-spin text-gold/60" />
+              <p className="text-sm text-off-white/40 font-sans">Loading account status…</p>
             </div>
-            {ibkrConnected ? (
-              <button
-                onClick={() => setDisconnectModal(true)}
-                disabled={ibkrLoading}
-                className={btnDanger}
-              >
-                {ibkrLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-                Disconnect
-              </button>
-            ) : (
-              <button
-                onClick={handleConnectIBKR}
-                disabled={ibkrConnecting}
-                className={btnPrimary}
-              >
-                {ibkrConnecting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
+          ) : (
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-gold/10 border border-gold/20 flex items-center justify-center flex-shrink-0">
+                  <DollarSign className="w-5 h-5 text-gold/70" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-off-white font-sans">Obsidian Capital Brokerage</p>
+                  {alpacaConnected ? (
+                    <>
+                      {alpacaAccount?.accountId && (
+                        <p className="text-xs text-off-white/40 font-sans mt-0.5">
+                          Account: <span className="font-mono text-off-white/60">
+                            {'•••• ' + String(alpacaAccount.accountId).slice(-4)}
+                          </span>
+                        </p>
+                      )}
+                      <div className="flex items-center flex-wrap gap-2 mt-1">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-sans border
+                          ${alpacaIsActive
+                            ? 'bg-gain/10 border-gain/20 text-gain'
+                            : 'bg-gold/10 border-gold/20 text-gold/80'
+                          }`}>
+                          <span className={`w-1.5 h-1.5 rounded-full inline-block ${alpacaIsActive ? 'bg-gain' : 'bg-gold/60'}`} />
+                          {alpacaIsActive ? 'Active' : alpacaStatus}
+                        </span>
+                        {alpacaAccount && alpacaAccount.buying_power !== undefined && (
+                          <span className="text-xs text-off-white/40 font-sans">
+                            Buying Power: <span className="text-off-white/70 font-mono">
+                              ${Number(alpacaAccount.buying_power).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </span>
+                        )}
+                        {alpacaAccount && alpacaAccount.equity !== undefined && (
+                          <span className="text-xs text-off-white/40 font-sans">
+                            Equity: <span className="text-off-white/70 font-mono">
+                              ${Number(alpacaAccount.equity).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-off-white/40 font-sans mt-0.5">Account setup in progress</p>
+                  )}
+                </div>
+              </div>
+              {!alpacaIsActive && (
+                <button
+                  className={btnPrimary}
+                  onClick={() => window.location.href = '/settings/security'}
+                >
                   <LinkIcon className="w-4 h-4" />
-                )}
-                Connect IBKR Account
-              </button>
-            )}
-          </div>
+                  Complete Setup
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
-
-      <ConfirmModal
-        open={disconnectModal}
-        title="Disconnect Interactive Brokers Account?"
-        message="This will remove your Interactive Brokers connection. You will not be able to place trades until you reconnect. Your positions and account history remain with Interactive Brokers."
-        confirmLabel="Disconnect"
-        onConfirm={handleDisconnectIBKR}
-        onClose={() => setDisconnectModal(false)}
-        danger
-      />
     </div>
   );
 }

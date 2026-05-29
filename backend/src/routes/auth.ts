@@ -6,6 +6,7 @@ import { query } from '../config/database';
 import { generateToken, authenticate } from '../middleware/auth';
 import { authLimiter, sensitiveActionLimiter } from '../middleware/rateLimit';
 import { identityService } from '../services/identity';
+import { alpacaBroker } from '../services/alpaca-broker';
 
 const router = Router();
 
@@ -155,6 +156,70 @@ router.post('/register', authLimiter, async (req: Request, res: Response): Promi
       console.error('[Auth] Stripe Identity session creation failed:', (kycErr as Error).message);
     }
 
+    // Attempt to create Alpaca Broker account programmatically.
+    // Non-blocking: failure here does not prevent Obsidian account creation.
+    // Users can complete broker account setup later via POST /auth/alpaca/complete-account.
+    let alpacaAccountId: string | null   = null;
+    let alpacaAccountNumber: string | null = null;
+    let alpacaStatus = 'ONBOARDING';
+
+    try {
+      const nameParts  = (name as string).trim().split(' ');
+      const firstName  = nameParts[0] ?? name;
+      const lastName   = nameParts.slice(1).join(' ') || firstName;
+      const addr       = address as { street: string; city: string; state: string; zip: string; country?: string };
+
+      const alpacaAccount = await alpacaBroker.createAccount({
+        firstName,
+        lastName,
+        email:          email as string,
+        dateOfBirth:    dob   as string,
+        taxId:          ssn_last4 as string,  // Note: full SSN required for production; last4 used here for dev
+        streetAddress:  addr.street,
+        city:           addr.city,
+        state:          addr.state,
+        postalCode:     addr.zip,
+        countryOfTaxResidence: 'USA',
+      });
+
+      alpacaAccountId     = alpacaAccount.id;
+      alpacaAccountNumber = alpacaAccount.account_number;
+      alpacaStatus        = alpacaAccount.status;
+
+      // Persist in alpaca_accounts table
+      await query(
+        `INSERT INTO alpaca_accounts (
+           id, user_id, alpaca_account_id, alpaca_account_number, status, paper_mode, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET
+           alpaca_account_id     = EXCLUDED.alpaca_account_id,
+           alpaca_account_number = EXCLUDED.alpaca_account_number,
+           status                = EXCLUDED.status,
+           updated_at            = NOW()`,
+        [
+          uuidv4(),
+          userId,
+          alpacaAccountId,
+          alpacaAccountNumber,
+          alpacaStatus,
+          true, // paper_mode default
+        ]
+      );
+
+      // Mirror key fields back onto the users row for quick lookups
+      await query(
+        `UPDATE users
+         SET alpaca_account_id = $1, alpaca_connected = true
+         WHERE id = $2`,
+        [alpacaAccountId, userId]
+      );
+
+      console.log(`[Auth] Alpaca Broker account created for user ${userId}: ${alpacaAccountId}`);
+    } catch (alpacaErr) {
+      // Non-blocking — log and continue; user can complete later
+      console.warn('[Auth] Alpaca Broker account creation skipped:', (alpacaErr as Error).message);
+    }
+
     // Generate JWT
     const token = generateToken({
       userId,
@@ -168,19 +233,26 @@ router.post('/register', authLimiter, async (req: Request, res: Response): Promi
       message: 'Account created successfully. Please complete identity verification to activate trading.',
       data: {
         user: {
-          id: userId,
+          id:               userId,
           name,
           email,
           tier,
-          kyc_status: 'pending',
-          buying_power: 0,
+          kyc_status:       'pending',
+          buying_power:     0,
+          alpaca_connected: !!alpacaAccountId,
         },
         token,
         kyc: {
-          session_id: verificationSessionId,
-          client_secret: verificationClientSecret,
+          session_id:       verificationSessionId,
+          client_secret:    verificationClientSecret,
           verification_url: verificationUrl,
-          required: true,
+          required:         true,
+        },
+        alpaca: {
+          account_id:     alpacaAccountId,
+          account_number: alpacaAccountNumber,
+          status:         alpacaStatus,
+          setup_complete: !!alpacaAccountId,
         },
       },
     });
@@ -324,7 +396,7 @@ router.get('/me', authenticate, async (req: Request, res: Response): Promise<voi
     const result = await query(
       `SELECT id, name, email, tier, kyc_status, buying_power, role,
               address, created_at, last_login, two_fa_enabled,
-              ibkr_connected, ibkr_account_id
+              alpaca_connected, alpaca_account_id
        FROM users WHERE id = $1`,
       [req.user!.userId]
     );
@@ -373,9 +445,9 @@ router.get('/me', authenticate, async (req: Request, res: Response): Promise<voi
           address: user.address,
           created_at: user.created_at,
           last_login: user.last_login,
-          two_fa_enabled: user.two_fa_enabled || false,
-          ibkr_connected: user.ibkr_connected || false,
-          ibkr_account_id: user.ibkr_account_id || null,
+          two_fa_enabled:   user.two_fa_enabled   || false,
+          alpaca_connected: user.alpaca_connected || false,
+          alpaca_account_id: user.alpaca_account_id || null,
           positions: parseInt(portfolio.positions || '0'),
           portfolio_cost_basis: parseFloat(portfolio.portfolio_cost_basis || '0'),
           kyc_session: latestKyc
@@ -644,5 +716,118 @@ router.get('/kyc/status', authenticate, async (req: Request, res: Response): Pro
     res.status(500).json({ success: false, error: 'Failed to fetch KYC status.' });
   }
 });
+
+// ─── POST /auth/alpaca/complete-account ──────────────────────────────────────
+// Create (or complete) the Alpaca Broker account for the authenticated user.
+// Called when Alpaca account creation failed at registration time (e.g., network error)
+// or when the user wants to upgrade from paper to live trading with full KYC data.
+
+const completeAlpacaSchema = Joi.object({
+  firstName:    Joi.string().trim().min(1).max(100).required(),
+  lastName:     Joi.string().trim().min(1).max(100).required(),
+  dateOfBirth:  Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).required(),
+  taxId:        Joi.string().min(9).max(11).required(), // Full SSN for production
+  phone:        Joi.string().optional().allow(''),
+  streetAddress: Joi.string().trim().min(5).max(200).required(),
+  city:         Joi.string().trim().min(2).max(100).required(),
+  state:        Joi.string().trim().length(2).uppercase().required(),
+  postalCode:   Joi.string().pattern(/^\d{5}(-\d{4})?$/).required(),
+  countryOfTaxResidence: Joi.string().default('USA'),
+});
+
+router.post(
+  '/alpaca/complete-account',
+  authenticate,
+  sensitiveActionLimiter,
+  async (req: Request, res: Response): Promise<void> => {
+    const { error, value } = completeAlpacaSchema.validate(req.body, { abortEarly: false });
+    if (error) {
+      res.status(400).json({
+        success: false,
+        error:   'Validation failed',
+        details: error.details.map((d) => d.message),
+      });
+      return;
+    }
+
+    const userId = req.user!.userId;
+
+    try {
+      // Check if account already exists
+      const existing = await query(
+        `SELECT alpaca_account_id, status FROM alpaca_accounts WHERE user_id = $1`,
+        [userId],
+      );
+
+      if (existing.rows.length > 0 && existing.rows[0].status === 'ACTIVE') {
+        res.status(409).json({
+          success: false,
+          error:   'Alpaca brokerage account is already active.',
+          code:    'ALPACA_ALREADY_ACTIVE',
+        });
+        return;
+      }
+
+      const userResult = await query('SELECT email FROM users WHERE id = $1', [userId]);
+      if (userResult.rows.length === 0) {
+        res.status(404).json({ success: false, error: 'User not found.' });
+        return;
+      }
+      const email = userResult.rows[0].email as string;
+
+      const alpacaAccount = await alpacaBroker.createAccount({
+        firstName:             value.firstName as string,
+        lastName:              value.lastName  as string,
+        email,
+        dateOfBirth:           value.dateOfBirth as string,
+        taxId:                 value.taxId       as string,
+        phone:                 value.phone       as string | undefined,
+        streetAddress:         value.streetAddress as string,
+        city:                  value.city          as string,
+        state:                 value.state         as string,
+        postalCode:            value.postalCode    as string,
+        countryOfTaxResidence: value.countryOfTaxResidence as string,
+      });
+
+      // Upsert into alpaca_accounts
+      await query(
+        `INSERT INTO alpaca_accounts (
+           id, user_id, alpaca_account_id, alpaca_account_number, status, paper_mode, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET
+           alpaca_account_id     = EXCLUDED.alpaca_account_id,
+           alpaca_account_number = EXCLUDED.alpaca_account_number,
+           status                = EXCLUDED.status,
+           updated_at            = NOW()`,
+        [
+          uuidv4(),
+          userId,
+          alpacaAccount.id,
+          alpacaAccount.account_number,
+          alpacaAccount.status,
+          true,
+        ],
+      );
+
+      await query(
+        `UPDATE users SET alpaca_account_id = $1, alpaca_connected = true WHERE id = $2`,
+        [alpacaAccount.id, userId],
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Brokerage account setup complete.',
+        data: {
+          alpaca_account_id:     alpacaAccount.id,
+          alpaca_account_number: alpacaAccount.account_number,
+          status:                alpacaAccount.status,
+        },
+      });
+    } catch (err) {
+      console.error('[Auth] Alpaca complete-account error:', (err as Error).message);
+      res.status(500).json({ success: false, error: 'Failed to set up brokerage account.' });
+    }
+  },
+);
 
 export default router;

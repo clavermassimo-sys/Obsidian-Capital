@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate, requireKyc } from '../middleware/auth';
-import { IBKRService } from '../services/ibkr';
+import { alpacaBroker } from '../services/alpaca-broker';
 
 const router = Router();
 
@@ -9,59 +9,61 @@ const router = Router();
 router.use(authenticate);
 
 // ─── GET /portfolio/holdings ──────────────────────────────────────────────────
-// If user has IBKR connected, fetch live positions; otherwise return empty
+// If user has an Alpaca account, fetch live positions; otherwise return empty
 
 router.get('/holdings', async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
 
-    // Look up IBKR connection
+    // Look up Alpaca account
     const connResult = await query(
-      `SELECT ic.access_token, ic.account_id
-       FROM ibkr_connections ic
-       WHERE ic.user_id = $1`,
-      [userId]
+      `SELECT alpaca_account_id FROM alpaca_accounts WHERE user_id = $1`,
+      [userId],
     );
 
-    if (connResult.rows.length === 0 || !connResult.rows[0].access_token) {
-      // No IBKR connection — return empty holdings
+    if (connResult.rows.length === 0 || !connResult.rows[0].alpaca_account_id) {
       res.json({
         success: true,
         data: { holdings: [], count: 0 },
-        message: 'No Interactive Brokers account connected.',
+        message: 'No brokerage account connected.',
       });
       return;
     }
 
-    const { access_token, account_id } = connResult.rows[0];
-    const ibkrClient = new IBKRService(access_token as string);
-    const positions = await ibkrClient.getPositions(account_id as string);
+    const alpacaAccountId = connResult.rows[0].alpaca_account_id as string;
+    const positions       = await alpacaBroker.getPositions(alpacaAccountId);
 
-    // Transform IBKR IBKRPosition → Holding shape
+    // Transform AlpacaPosition → Holding shape expected by frontend
     const holdings = positions
-      .filter((p) => p.position !== 0)
+      .filter((p) => parseFloat(p.qty) !== 0)
       .map((p) => {
-        const costBasis = parseFloat((p.position * p.avgCost).toFixed(2));
-        const returnDollar = p.unrealizedPnl;
-        const returnPct =
-          costBasis > 0
-            ? parseFloat(((returnDollar / costBasis) * 100).toFixed(2))
-            : 0;
+        const qty            = parseFloat(p.qty);
+        const avgEntry       = parseFloat(p.avg_entry_price);
+        const currentPrice   = parseFloat(p.current_price);
+        const marketValue    = parseFloat(p.market_value);
+        const costBasis      = parseFloat(p.cost_basis);
+        const unrealizedPl   = parseFloat(p.unrealized_pl);
+        const unrealizedPlpc = parseFloat(p.unrealized_plpc);
+
+        const returnPct = costBasis > 0
+          ? parseFloat(((unrealizedPl / costBasis) * 100).toFixed(2))
+          : 0;
+
         return {
           // Frontend HoldingRaw shape
-          symbol:           p.contractDesc,
-          qty:              p.position,
-          avg_entry_price:  p.avgCost,
-          current_price:    p.mktPrice,
-          market_value:     p.mktValue,
-          unrealized_pl:    p.unrealizedPnl,
-          unrealized_plpc:  returnPct / 100,
+          symbol:           p.symbol,
+          qty,
+          avg_entry_price:  avgEntry,
+          current_price:    currentPrice,
+          market_value:     marketValue,
+          unrealized_pl:    unrealizedPl,
+          unrealized_plpc:  unrealizedPlpc,
           // Extra context
-          conid:            p.conid,
-          acct_id:          p.acctId,
           cost_basis:       costBasis,
-          gain_loss:        returnDollar,
+          gain_loss:        unrealizedPl,
           gain_loss_pct:    returnPct,
+          side:             p.side,
+          asset_class:      p.asset_class,
         };
       });
 
@@ -89,11 +91,11 @@ router.get('/portfolio-value', requireKyc, async (req: Request, res: Response): 
            ROUND((shares * avg_cost)::numeric, 2) AS cost_basis
          FROM holdings
          WHERE user_id = $1`,
-        [req.user!.userId]
+        [req.user!.userId],
       ),
       query(
         'SELECT buying_power, tier, name FROM users WHERE id = $1',
-        [req.user!.userId]
+        [req.user!.userId],
       ),
       query(
         `SELECT
@@ -103,29 +105,29 @@ router.get('/portfolio-value', requireKyc, async (req: Request, res: Response): 
            COUNT(*) AS total_trades
          FROM trades
          WHERE user_id = $1 AND status = 'completed'`,
-        [req.user!.userId]
+        [req.user!.userId],
       ),
     ]);
 
-    const user = userResult.rows[0];
+    const user       = userResult.rows[0];
     const tradeStats = tradesResult.rows[0];
 
     // Calculate portfolio market value with mock prices
     let totalMarketValue = 0;
-    let totalCostBasis = 0;
+    let totalCostBasis   = 0;
 
     for (const h of holdingsResult.rows) {
-      const variance = 1 + (Math.random() * 0.2 - 0.1);
+      const variance     = 1 + (Math.random() * 0.2 - 0.1);
       const currentPrice = parseFloat(h.avg_cost) * variance;
-      totalMarketValue += h.shares * currentPrice;
-      totalCostBasis += parseFloat(h.cost_basis);
+      totalMarketValue  += h.shares * currentPrice;
+      totalCostBasis    += parseFloat(h.cost_basis);
     }
 
     totalMarketValue = parseFloat(totalMarketValue.toFixed(2));
-    totalCostBasis = parseFloat(totalCostBasis.toFixed(2));
+    totalCostBasis   = parseFloat(totalCostBasis.toFixed(2));
 
-    const buyingPower = parseFloat(user?.buying_power || '0');
-    const totalAccountValue = parseFloat((totalMarketValue + buyingPower).toFixed(2));
+    const buyingPower        = parseFloat(user?.buying_power || '0');
+    const totalAccountValue  = parseFloat((totalMarketValue + buyingPower).toFixed(2));
     const unrealizedGainLoss = parseFloat((totalMarketValue - totalCostBasis).toFixed(2));
     const unrealizedGainLossPct =
       totalCostBasis > 0
@@ -140,19 +142,19 @@ router.get('/portfolio-value', requireKyc, async (req: Request, res: Response): 
           tier: user?.tier,
         },
         portfolio: {
-          market_value: totalMarketValue,
-          cost_basis: totalCostBasis,
-          unrealized_gain_loss: unrealizedGainLoss,
+          market_value:             totalMarketValue,
+          cost_basis:               totalCostBasis,
+          unrealized_gain_loss:     unrealizedGainLoss,
           unrealized_gain_loss_pct: unrealizedGainLossPct,
-          positions: holdingsResult.rows.length,
+          positions:                holdingsResult.rows.length,
         },
         account_summary: {
-          total_account_value: totalAccountValue,
-          buying_power: buyingPower,
-          total_invested: parseFloat(tradeStats.total_invested || '0'),
-          total_proceeds: parseFloat(tradeStats.total_proceeds || '0'),
-          total_commissions_paid: parseFloat(tradeStats.total_commissions_paid || '0'),
-          total_trades: parseInt(tradeStats.total_trades || '0'),
+          total_account_value:     totalAccountValue,
+          buying_power:            buyingPower,
+          total_invested:          parseFloat(tradeStats.total_invested || '0'),
+          total_proceeds:          parseFloat(tradeStats.total_proceeds || '0'),
+          total_commissions_paid:  parseFloat(tradeStats.total_commissions_paid || '0'),
+          total_trades:            parseInt(tradeStats.total_trades || '0'),
         },
         as_of: new Date().toISOString(),
       },
@@ -164,55 +166,67 @@ router.get('/portfolio-value', requireKyc, async (req: Request, res: Response): 
 });
 
 // ─── GET /portfolio/portfolio-history ─────────────────────────────────────────
-// Try IBKR GET /portfolio/{accountId}/performance; fallback to empty if unavailable
+// Fetch portfolio performance history from Alpaca Broker; fallback to empty
 
 router.get('/portfolio-history', requireKyc, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user!.userId;
-    const period = (req.query.period as string) || '30d';
+    const period = (req.query.period as string) || '1M';
 
-    // Try IBKR performance data first
+    // Map frontend period labels to Alpaca period format
+    const periodMap: Record<string, string> = {
+      '7d':  '1W',
+      '30d': '1M',
+      '1M':  '1M',
+      '3M':  '3M',
+      '6M':  '6M',
+      '1Y':  '1A',
+      'ALL': '5A',
+    };
+    const alpacaPeriod = periodMap[period] ?? '1M';
+
+    // Look up Alpaca account
     const connResult = await query(
-      `SELECT ic.access_token, ic.account_id FROM ibkr_connections ic WHERE ic.user_id = $1`,
-      [userId]
+      `SELECT alpaca_account_id FROM alpaca_accounts WHERE user_id = $1`,
+      [userId],
     );
 
-    if (connResult.rows.length > 0 && connResult.rows[0].access_token) {
+    if (connResult.rows.length > 0 && connResult.rows[0].alpaca_account_id) {
       try {
-        const { access_token, account_id } = connResult.rows[0];
-        const ibkrClient = new IBKRService(access_token as string);
+        const dataPoints = await alpacaBroker.getPortfolioHistory(
+          connResult.rows[0].alpaca_account_id as string,
+          alpacaPeriod,
+        );
 
-        // IBKR endpoint: GET /portfolio/{accountId}/performance
-        // Returns { id, nav: [{date, value}], cps, pm, ... }
-        const perfData = await ibkrClient['client'].get<{
-          nav?: Array<{ date: string; val: number }>;
-          id?: string;
-        }>(`/portfolio/${encodeURIComponent(account_id as string)}/performance`);
-
-        const navPoints = perfData.data?.nav ?? [];
-        if (navPoints.length > 0) {
-          const dataPoints = navPoints.map((pt, i, arr) => {
-            const prevVal = i > 0 ? arr[i - 1].val : pt.val;
-            const changePct = prevVal > 0
-              ? parseFloat((((pt.val - prevVal) / prevVal) * 100).toFixed(2))
-              : 0;
-            return { date: pt.date, value: pt.val, change_pct: changePct };
-          });
-
+        if (dataPoints.length > 0) {
           const firstValue = dataPoints[0]?.value ?? 0;
           const lastValue  = dataPoints[dataPoints.length - 1]?.value ?? 0;
-          const totalReturn = parseFloat((lastValue - firstValue).toFixed(2));
+          const totalReturn    = parseFloat((lastValue - firstValue).toFixed(2));
           const totalReturnPct = firstValue > 0
             ? parseFloat(((totalReturn / firstValue) * 100).toFixed(2))
             : 0;
+
+          // Enrich with change_pct per data point
+          const enriched = dataPoints.map((pt, i, arr) => {
+            const prev       = i > 0 ? arr[i - 1].value : pt.value;
+            const changePct  = prev > 0
+              ? parseFloat((((pt.value - prev) / prev) * 100).toFixed(2))
+              : 0;
+            return { date: pt.date, value: pt.value, change_pct: changePct };
+          });
 
           res.json({
             success: true,
             data: {
               period,
-              data_points: dataPoints,
-              summary: { start_value: firstValue, end_value: lastValue, total_return: totalReturn, total_return_pct: totalReturnPct },
-              source: 'ibkr',
+              data_points: enriched,
+              summary: {
+                start_value:      firstValue,
+                end_value:        lastValue,
+                total_return:     totalReturn,
+                total_return_pct: totalReturnPct,
+              },
+              source: 'alpaca',
             },
           });
           return;
@@ -222,7 +236,7 @@ router.get('/portfolio-history', requireKyc, async (req: Request, res: Response)
       }
     }
 
-    // No IBKR data — return empty
+    // No Alpaca data — return empty
     res.json({
       success: true,
       data: {

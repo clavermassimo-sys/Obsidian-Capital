@@ -27,7 +27,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { marketApi } from '@/services/api';
 import { CommissionCalculator } from './CommissionCalculator';
 import { OrderConfirmModal } from './OrderConfirmModal';
-import { AlpacaConnectBanner } from '@/components/ui/AlpacaConnectBanner';
 
 // ── Stock Info (populated from real API) ──────────────────────
 
@@ -82,7 +81,7 @@ interface TradePanelProps {
 }
 
 export function TradePanel({ onClose, className = '' }: TradePanelProps) {
-  const { user, ibkrConnected } = useAuth();
+  const { user, alpacaConnected } = useAuth();
   const { selectedTicker, setSelectedTicker, submitOrder } = useTrading();
 
   const tier: CommissionTier = user?.tier ?? 'standard';
@@ -261,8 +260,8 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
   // ── Render helpers ────────────────────────────────────────
 
   const isBuy = side === 'buy';
-  const modeLabel = ibkrConnected ? 'LIVE' : 'PAPER';
-  const modeBg    = ibkrConnected ? 'bg-[#3d9e6e]/20 text-[#3d9e6e] border-[#3d9e6e]/30' : 'bg-surface-3 text-[#6b6560] border-border';
+  const modeLabel = alpacaConnected ? 'LIVE' : 'PAPER';
+  const modeBg    = alpacaConnected ? 'bg-[#3d9e6e]/20 text-[#3d9e6e] border-[#3d9e6e]/30' : 'bg-surface-3 text-[#6b6560] border-border';
 
   const orderTypeLabel = ORDER_TYPES.find((o) => o.id === orderType)?.label ?? 'Market';
 
@@ -294,9 +293,17 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
 
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
 
-          {/* ── IBKR not connected notice ─────────────────── */}
-          {!ibkrConnected && (
-            <AlpacaConnectBanner compact />
+          {/* ── Account not yet active notice ────────────── */}
+          {!alpacaConnected && (
+            <div className="rounded-lg border border-gold/20 bg-gold/5 px-3 py-2.5 flex items-start gap-2">
+              <AlertCircle size={13} className="text-gold/70 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs font-sans font-semibold text-gold/80">Account Pending</p>
+                <p className="text-2xs font-sans text-[#6b6560] mt-0.5 leading-relaxed">
+                  Your brokerage account is being activated. Orders will be available once setup is complete.
+                </p>
+              </div>
+            </div>
           )}
 
           {/* ── Ticker Search ────────────────────────────────── */}
@@ -618,7 +625,7 @@ export function TradePanel({ onClose, className = '' }: TradePanelProps) {
               <p className="text-2xs font-sans text-[#6b6560] leading-relaxed">
                 A commission of{' '}
                 <span className="text-[#a09a8e]">{tier === 'private' ? '5–6%' : tier === 'member' ? '7–9%' : '10–12%'}</span>{' '}
-                is charged by Obsidian Capital on all trades. This is separate from your IBKR account fees.
+                is charged by Obsidian Capital on all trades.
               </p>
             </div>
           )}

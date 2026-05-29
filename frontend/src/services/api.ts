@@ -156,7 +156,7 @@ export interface IBKROrder {
   commission?: number;
 }
 
-/** @deprecated Use IBKROrder */
+/** Alpaca Broker order shape (same fields as IBKROrder for compatibility) */
 export type AlpacaOrder = IBKROrder;
 
 export interface OrdersResponse {
@@ -189,14 +189,13 @@ export interface PreviewParams {
 export interface PlaceOrderParams {
   ticker: string;
   company_name?: string;
-  conid?: number;
-  side: 'BUY' | 'SELL';
+  side: 'buy' | 'sell';
   qty: number;
-  orderType?: string;
-  tif?: string;
-  price?: number;
-  auxPrice?: number;
-  trailingPercent?: number;
+  orderType?: 'market' | 'limit' | 'stop' | 'stop_limit' | 'trailing_stop';
+  tif?: 'day' | 'gtc' | 'ioc' | 'fok';
+  limitPrice?: number;
+  stopPrice?: number;
+  trailPct?: number;
   estimatedPrice?: number;
 }
 
@@ -244,9 +243,9 @@ export const tradesApi = {
   getOrders: () =>
     api.get<OrdersResponse>('/trades/orders').then((r) => r.data),
 
-  /** Returns the IBKR account summary (buying power, equity, etc.) */
+  /** Returns the Alpaca Broker account summary (buying power, equity, etc.) */
   getAccount: () =>
-    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/ibkr/account').then((r) => r.data.data),
+    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/account').then((r) => r.data.data),
 
   previewOrder: (params: PreviewParams) =>
     api.post('/trades/preview', params).then((r) => r.data),
@@ -255,44 +254,67 @@ export const tradesApi = {
     api.post('/trades/order', params).then((r) => r.data),
 };
 
-// ── Account data shape from IBKR ──────────────────────────────
+// ── Broker account data shape (Alpaca) ────────────────────────
 
 export interface IBKRAccountData {
-  accountId:       string;
-  accountType:     string;
+  /** Alpaca internal account ID */
+  id?:             string;
+  accountId?:      string;
+  accountType?:    string;
+  accountNumber?:  string;
+  status?:         string;
   currency:        string;
   buying_power:    number;
   equity:          number;
   cash:            number;
-  net_liquidation: number;
-  unrealized_pnl:  number;
-  realized_pnl:    number;
+  net_liquidation?: number;
+  portfolio_value?: number;
+  long_market_value?: number;
+  unrealized_pnl?: number;
+  realized_pnl?:   number;
 }
 
 export interface IBKRAccountResponse {
-  account:       IBKRAccountData | null;
-  ibkr_connected: boolean;
-  paper_mode?:   boolean;
+  account:          IBKRAccountData | null;
+  /** @deprecated Use alpaca_connected */
+  ibkr_connected?:  boolean;
+  alpaca_connected?: boolean;
+  paper_mode?:      boolean;
 }
 
-// ── IBKR API ──────────────────────────────────────────────────
+// ── Broker API (Alpaca) ───────────────────────────────────────
 
-export const ibkrApi = {
-  /** Get the IBKR OAuth authorization URL from the backend */
-  getAuthUrl: () =>
-    api.get<{ success: boolean; data: { url: string; state: string } }>('/trades/ibkr/auth-url').then((r) => r.data),
-
-  /** Fetch the connected IBKR account summary */
+export const brokerApi = {
+  /** Fetch the Alpaca Broker account summary */
   getAccount: () =>
-    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/ibkr/account').then((r) => r.data),
+    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/account').then((r) => r.data),
 
-  /** Disconnect the user's IBKR account */
+  /** Get paper/live mode status */
+  getMode: () =>
+    api.get<{ success: boolean; data: { paper_mode: boolean; connected: boolean; mode_label: string } }>('/trades/mode').then((r) => r.data),
+};
+
+/**
+ * @deprecated Use brokerApi instead.
+ * Kept for backwards compatibility with components that import ibkrApi.
+ */
+export const ibkrApi = {
+  /** @deprecated No-op. Alpaca uses programmatic account creation — no OAuth URL. */
+  getAuthUrl: () =>
+    Promise.resolve({ success: false, data: { url: '', state: '' } }),
+
+  /** Fetch the connected broker account summary */
+  getAccount: () =>
+    api.get<{ success: boolean; data: IBKRAccountResponse }>('/trades/account').then((r) => r.data),
+
+  /** @deprecated Alpaca accounts cannot be disconnected via OAuth. */
   disconnect: () =>
-    api.post<{ success: boolean; message: string }>('/trades/ibkr/disconnect').then((r) => r.data),
+    Promise.resolve({ success: false, message: 'Use brokerApi instead.' }),
 
   getMode: () =>
-    api.get<{ paperMode: boolean }>('/trades/mode').then((r) => r.data),
+    api.get<{ success: boolean; data: { paper_mode: boolean; connected: boolean } }>('/trades/mode')
+      .then((r) => ({ paperMode: r.data.data.paper_mode })),
 
-  setMode: (paperMode: boolean) =>
-    api.post('/trades/mode', { paperMode }).then((r) => r.data),
+  setMode: (_paperMode: boolean) =>
+    Promise.resolve({ success: false }),
 };

@@ -33,9 +33,15 @@ export interface User {
   avatarUrl?: string;
   /** Phone number (E.164 format) */
   phone?: string;
-  /** Whether the user has a linked Interactive Brokers account */
+  /** Whether the user has an active Alpaca Broker account */
+  alpacaConnected?: boolean;
+  /** Alpaca Broker internal account ID */
+  alpacaAccountId?: string;
+  /** Alpaca account status: ACTIVE, ONBOARDING, SUBMITTED, etc. */
+  alpacaStatus?: string;
+  /** @deprecated Use alpacaConnected */
   ibkrConnected?: boolean;
-  /** IBKR account ID (e.g. U1234567) */
+  /** @deprecated Use alpacaAccountId */
   ibkrAccountId?: string;
 }
 
@@ -275,27 +281,27 @@ export interface Notification {
   createdAt: string;
 }
 
-// ── Interactive Brokers ───────────────────────────────────────
+// ── Broker Account ────────────────────────────────────────────
 
-export interface IBKRAccount {
+export interface BrokerAccount {
   id: string;
-  /** IBKR account ID (e.g. U1234567) */
+  /** Alpaca account ID */
   accountId: string;
+  accountNumber?: string;
   status: string;
   currency: string;
   buyingPower: number;
   cash: number;
   portfolioValue: number;
   equity: number;
-  lastEquity: number;
   longMarketValue: number;
-  patternDayTrader: boolean;
-  tradingBlocked: boolean;
   paperMode: boolean;
 }
 
-/** @deprecated Use IBKRAccount */
-export type AlpacaAccount = IBKRAccount;
+/** @deprecated Use BrokerAccount */
+export type IBKRAccount = BrokerAccount;
+/** @deprecated Use BrokerAccount */
+export type AlpacaAccount = BrokerAccount;
 
 // ── Subscription / Billing ────────────────────────────────────
 

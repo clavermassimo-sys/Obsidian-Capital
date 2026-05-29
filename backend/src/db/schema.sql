@@ -254,12 +254,13 @@ ON CONFLICT (email) DO NOTHING;
 
 -- ─── EXTEND USERS TABLE ───────────────────────────────────────────────────────
 
-ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id  VARCHAR(255);
+-- Alpaca Broker account link (replaces IBKR)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS alpaca_account_id   VARCHAR(64);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS alpaca_connected     BOOLEAN DEFAULT FALSE;
+-- Legacy IBKR columns kept for backwards-compat migration; no longer written
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ibkr_connected      BOOLEAN DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS ibkr_account_id     VARCHAR(50);
-
--- Drop old alpaca column if it still exists (idempotent migration)
-ALTER TABLE users DROP COLUMN IF EXISTS alpaca_connected;
 
 -- ─── COMMISSIONS ─────────────────────────────────────────────────────────────
 -- One record per trade execution; tracks commission billing lifecycle.
@@ -318,23 +319,38 @@ CREATE TABLE IF NOT EXISTS price_alerts (
 CREATE INDEX IF NOT EXISTS idx_price_alerts_user_id ON price_alerts(user_id);
 CREATE INDEX IF NOT EXISTS idx_price_alerts_ticker  ON price_alerts(ticker);
 
--- ─── IBKR CONNECTIONS ─────────────────────────────────────────────────────────
--- Stores per-user Interactive Brokers OAuth tokens for proxying trade execution.
+-- ─── ALPACA ACCOUNTS ──────────────────────────────────────────────────────────
+-- Stores per-user Alpaca Broker account identifiers.
+-- Accounts are created programmatically via the Alpaca Broker API.
+-- No OAuth tokens stored — auth uses static Basic credentials (server-side only).
 
-CREATE TABLE IF NOT EXISTS ibkr_connections (
-  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id           UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
-  access_token      TEXT NOT NULL,
-  refresh_token     TEXT,
-  account_id        VARCHAR(50),
-  account_type      VARCHAR(50),
-  paper_mode        BOOLEAN DEFAULT FALSE,
-  token_expires_at  TIMESTAMP WITH TIME ZONE,
-  connected_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+CREATE TABLE IF NOT EXISTS alpaca_accounts (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                UUID UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  alpaca_account_id      VARCHAR(64) NOT NULL,
+  alpaca_account_number  VARCHAR(20),
+  status                 VARCHAR(32) DEFAULT 'ONBOARDING',
+  paper_mode             BOOLEAN DEFAULT TRUE,
+  created_at             TIMESTAMPTZ DEFAULT NOW(),
+  updated_at             TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ibkr_connections_user_id ON ibkr_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_alpaca_accounts_user_id ON alpaca_accounts(user_id);
+
+-- ─── IBKR CONNECTIONS (legacy — kept for historical data, no longer written) ──
+
+-- CREATE TABLE IF NOT EXISTS ibkr_connections (
+--   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+--   user_id           UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+--   access_token      TEXT NOT NULL,
+--   refresh_token     TEXT,
+--   account_id        VARCHAR(50),
+--   account_type      VARCHAR(50),
+--   paper_mode        BOOLEAN DEFAULT FALSE,
+--   token_expires_at  TIMESTAMP WITH TIME ZONE,
+--   connected_at      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+--   updated_at        TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- );
 
 -- ─── KYC SESSIONS ─────────────────────────────────────────────────────────────
 -- Tracks Stripe Identity verification sessions per user.
@@ -356,5 +372,5 @@ CREATE INDEX IF NOT EXISTS idx_kyc_sessions_session_id ON kyc_sessions(stripe_ve
 CREATE INDEX IF NOT EXISTS idx_users_stripe_customer_id ON users(stripe_customer_id)
   WHERE stripe_customer_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_users_ibkr_account_id ON users(ibkr_account_id)
-  WHERE ibkr_account_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_alpaca_account_id ON users(alpaca_account_id)
+  WHERE alpaca_account_id IS NOT NULL;

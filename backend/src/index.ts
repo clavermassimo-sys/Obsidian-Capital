@@ -7,7 +7,7 @@ import morgan from 'morgan';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 
-import { IBKRService } from './services/ibkr';
+import { alpacaBroker } from './services/alpaca-broker';
 import { polygonService } from './services/polygon';
 import { query as dbQuery } from './config/database';
 
@@ -187,36 +187,75 @@ const CORE_TICKERS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', '
 const lastPriceCache: Record<string, number> = {};
 
 /**
- * Fetch real quotes from Polygon.io and broadcast to all connected clients.
- * Runs every 15 seconds — Polygon free tier allows ~5 calls/min.
+ * Fetch real quotes from Alpaca data API (batch snapshot) and broadcast to all
+ * connected clients. Falls back to Polygon if Alpaca fails.
+ * Runs every 15 seconds.
  */
 const startPriceBroadcaster = () => {
   const broadcast = async () => {
     if (connectedClients === 0) return;
 
-    const results = await Promise.allSettled(
-      CORE_TICKERS.map((ticker) => polygonService.getQuote(ticker))
-    );
+    let updates: Array<{
+      ticker: string;
+      name: string;
+      price: number;
+      change: number;
+      change_pct: number;
+      tick_change: number;
+      volume: number;
+      timestamp: number;
+    }> = [];
 
-    const updates = results
-      .map((r, i) => {
-        if (r.status !== 'fulfilled') return null;
-        const q = r.value;
-        const ticker = CORE_TICKERS[i];
-        const prev = lastPriceCache[ticker] ?? q.price;
-        lastPriceCache[ticker] = q.price;
-        return {
-          ticker,
-          name: ticker,
-          price: q.price,
-          change: q.change,
-          change_pct: q.changePct,
-          tick_change: parseFloat((q.price - prev).toFixed(4)),
-          volume: q.volume ?? 0,
-          timestamp: Date.now(),
-        };
-      })
-      .filter((u): u is NonNullable<typeof u> => u !== null);
+    // Primary: Alpaca batch snapshot (one request for all tickers)
+    try {
+      const snapshots = await alpacaBroker.getSnapshots(CORE_TICKERS);
+      updates = CORE_TICKERS
+        .map((ticker) => {
+          const s = snapshots[ticker];
+          if (!s) return null;
+          const prev = lastPriceCache[ticker] ?? s.price;
+          lastPriceCache[ticker] = s.price;
+          return {
+            ticker,
+            name:        ticker,
+            price:       s.price,
+            change:      s.change,
+            change_pct:  s.changePct,
+            tick_change: parseFloat((s.price - prev).toFixed(4)),
+            volume:      0,
+            timestamp:   Date.now(),
+          };
+        })
+        .filter((u): u is NonNullable<typeof u> => u !== null);
+    } catch {
+      // Fallback: Polygon individual quotes
+      try {
+        const results = await Promise.allSettled(
+          CORE_TICKERS.map((ticker) => polygonService.getQuote(ticker)),
+        );
+        updates = results
+          .map((r, i) => {
+            if (r.status !== 'fulfilled') return null;
+            const q      = r.value;
+            const ticker = CORE_TICKERS[i];
+            const prev   = lastPriceCache[ticker] ?? q.price;
+            lastPriceCache[ticker] = q.price;
+            return {
+              ticker,
+              name:        ticker,
+              price:       q.price,
+              change:      q.change,
+              change_pct:  q.changePct,
+              tick_change: parseFloat((q.price - prev).toFixed(4)),
+              volume:      q.volume ?? 0,
+              timestamp:   Date.now(),
+            };
+          })
+          .filter((u): u is NonNullable<typeof u> => u !== null);
+      } catch {
+        // Non-fatal — skip this tick
+      }
+    }
 
     if (updates.length > 0) {
       io.emit('price:update', { updates, server_time: Date.now() });
@@ -322,29 +361,7 @@ io.on('connection', (socket: Socket) => {
   });
 });
 
-// ─── IBKR Session Keepalive ───────────────────────────────────────────────────
-// Ping every connected IBKR session every 60 seconds to prevent token expiry.
-
-setInterval(async () => {
-  try {
-    const result = await dbQuery(
-      `SELECT user_id, access_token FROM ibkr_connections WHERE access_token IS NOT NULL`
-    );
-    for (const row of result.rows) {
-      try {
-        const svc = new IBKRService(row.access_token as string);
-        const alive = await svc.ping();
-        if (!alive) {
-          console.warn(`[IBKR] Keepalive failed for user ${row.user_id as string}`);
-        }
-      } catch {
-        // Non-fatal — token may have expired
-      }
-    }
-  } catch {
-    // DB unavailable — skip this tick
-  }
-}, 60_000);
+// Note: Alpaca Broker API uses Basic Auth — no session keepalive required.
 
 // Start broadcasters
 startPriceBroadcaster();
@@ -402,9 +419,9 @@ httpServer.listen(PORT, () => {
   console.log(`│    GET  /api/auth/kyc/status   [Stripe Identity] │`);
   console.log(`│    POST /api/auth/kyc/session  [Stripe Identity] │`);
   console.log(`│    GET  /api/portfolio/holdings                  │`);
-  console.log(`│    POST /api/trades/order          [IBKR]        │`);
-  console.log(`│    GET  /api/trades/positions      [IBKR]        │`);
-  console.log(`│    GET  /api/trades/ibkr/auth-url  [IBKR OAuth]  │`);
+  console.log(`│    POST /api/trades/order       [Alpaca Broker]  │`);
+  console.log(`│    GET  /api/trades/positions   [Alpaca Broker]  │`);
+  console.log(`│    GET  /api/trades/account     [Alpaca Broker]  │`);
   console.log(`│    GET  /api/market/quote/:ticker  [Polygon.io]  │`);
   console.log(`│    GET  /api/market/crypto         [CoinGecko]   │`);
   console.log(`│    GET  /api/subscriptions/status  [Stripe]      │`);

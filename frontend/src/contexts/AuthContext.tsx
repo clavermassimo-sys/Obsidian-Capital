@@ -11,7 +11,6 @@ import React, {
   ReactNode,
 } from 'react';
 import type { User, LoginCredentials, Subscription } from '@/types/index';
-import { ibkrOAuth } from '@/services/ibkr';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -20,20 +19,15 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
-  ibkrConnected: boolean;
-  /** @deprecated Use ibkrConnected */
+  /** Whether the user has an active Alpaca Broker account */
   alpacaConnected: boolean;
+  /** @deprecated Use alpacaConnected */
+  ibkrConnected: boolean;
   subscription: Subscription | null;
   login: (credentials: LoginCredentials & { twoFactorCode?: string }) => Promise<{ requires2FA: boolean }>;
   logout: () => void;
   register: (payload: RegisterPayload) => Promise<void>;
   clearError: () => void;
-  connectIBKR: (paperMode?: boolean) => void;
-  disconnectIBKR: () => Promise<void>;
-  /** @deprecated Use connectIBKR */
-  connectAlpaca: (paperMode?: boolean) => void;
-  /** @deprecated Use disconnectIBKR */
-  disconnectAlpaca: () => Promise<void>;
   upgradeTier: (tier: 'member' | 'private') => Promise<void>;
 }
 
@@ -53,22 +47,22 @@ export interface RegisterPayload {
 // ── Mock Data ─────────────────────────────────────────────────
 
 const MOCK_USER: User = {
-  id: 'usr_01',
-  email: 'massimo@obsidiancapital.com',
-  name: 'Massimo Caruso',
-  tier: 'private',
-  kycStatus: 'approved',
-  buyingPower: 250000,
-  portfolioValue: 1_843_200,
-  ibkrConnected: false,
-  createdAt: '2026-01-15T00:00:00Z',
+  id:               'usr_01',
+  email:            'massimo@obsidiancapital.com',
+  name:             'Massimo Caruso',
+  tier:             'private',
+  kycStatus:        'approved',
+  buyingPower:      250000,
+  portfolioValue:   1_843_200,
+  alpacaConnected:  true,
+  createdAt:        '2026-01-15T00:00:00Z',
 };
 
 const MOCK_SUBSCRIPTION: Subscription = {
-  tier: 'private',
-  status: 'active',
+  tier:             'private',
+  status:           'active',
   currentPeriodEnd: '2026-06-15T00:00:00Z',
-  monthlyAmount: 500,
+  monthlyAmount:    500,
 };
 
 // ── Context ───────────────────────────────────────────────────
@@ -76,22 +70,21 @@ const MOCK_SUBSCRIPTION: Subscription = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [ibkrConnected, setIbkrConnected] = useState(false);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [user, setUser]               = useState<User | null>(null);
+  const [isLoading, setIsLoading]     = useState(true);
+  const [error, setError]             = useState<string | null>(null);
+  const [alpacaConnected, setAlpacaConnected] = useState(false);
+  const [subscription, setSubscription]       = useState<Subscription | null>(null);
 
   // Restore session on mount
   useEffect(() => {
     const stored = localStorage.getItem('oc_user');
     if (stored) {
       try {
-        const parsed = JSON.parse(stored);
+        const parsed = JSON.parse(stored) as User;
         setUser(parsed);
-        // Restore IBKR connection status
-        const ibkrMode = localStorage.getItem('ibkr_connected');
-        if (ibkrMode === 'true') setIbkrConnected(true);
+        // Restore Alpaca connection status from user object
+        setAlpacaConnected(parsed.alpacaConnected ?? false);
         // Mock subscription based on tier
         setSubscription({ ...MOCK_SUBSCRIPTION, tier: parsed.tier ?? 'standard' });
       } catch {
@@ -129,14 +122,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           throw new Error('Invalid verification code.');
         }
 
-        const loggedInUser = { ...MOCK_USER, email: credentials.email };
+        const loggedInUser: User = { ...MOCK_USER, email: credentials.email };
         setUser(loggedInUser);
         localStorage.setItem('oc_user', JSON.stringify(loggedInUser));
         setSubscription({ ...MOCK_SUBSCRIPTION, tier: loggedInUser.tier });
-
-        // Restore IBKR status
-        const ibkrMode = localStorage.getItem('ibkr_connected');
-        if (ibkrMode === 'true') setIbkrConnected(true);
+        setAlpacaConnected(loggedInUser.alpacaConnected ?? false);
 
         return { requires2FA: false };
       } catch (err) {
@@ -147,14 +137,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       }
     },
-    []
+    [],
   );
 
   // ── Logout ────────────────────────────────────────────────
 
   const logout = useCallback(() => {
     setUser(null);
-    setIbkrConnected(false);
+    setAlpacaConnected(false);
     setSubscription(null);
     localStorage.removeItem('oc_user');
   }, []);
@@ -170,21 +160,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('All fields are required.');
       }
       const newUser: User = {
-        id: `usr_${Date.now()}`,
-        email: payload.email,
-        name: payload.name,
-        tier: payload.tier === 'private' ? 'private' : 'standard',
-        kycStatus: 'pending',
-        buyingPower: 0,
-        portfolioValue: 0,
-        ibkrConnected: false,
-        createdAt: new Date().toISOString(),
+        id:              `usr_${Date.now()}`,
+        email:           payload.email,
+        name:            payload.name,
+        tier:            payload.tier === 'private' ? 'private' : 'standard',
+        kycStatus:       'pending',
+        buyingPower:     0,
+        portfolioValue:  0,
+        alpacaConnected: false, // account created async — initially false
+        createdAt:       new Date().toISOString(),
       };
       setUser(newUser);
       localStorage.setItem('oc_user', JSON.stringify(newUser));
+      setAlpacaConnected(false);
       setSubscription({
-        tier: newUser.tier,
-        status: 'trialing',
+        tier:     newUser.tier,
+        status:   'trialing',
         trialEnd: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       });
     } catch (err) {
@@ -196,44 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── IBKR OAuth ────────────────────────────────────────────
-
-  /**
-   * Redirect user to IBKR OAuth to connect their account.
-   * @param paperMode - true = paper trading, false = live (default true)
-   */
-  const connectIBKR = useCallback((paperMode: boolean = true) => {
-    const authUrl = ibkrOAuth.getAuthUrl(paperMode);
-    window.location.href = authUrl;
-  }, []);
-
-  /**
-   * Disconnect IBKR account by removing stored tokens (via backend).
-   */
-  const disconnectIBKR = useCallback(async () => {
-    try {
-      await fetch('/api/trades/ibkr/disconnect', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${(() => {
-            try { return JSON.parse(localStorage.getItem('oc_user') || '{}').token || ''; } catch { return ''; }
-          })()}`,
-        },
-      });
-    } catch {
-      // Best-effort disconnect
-    } finally {
-      setIbkrConnected(false);
-      localStorage.removeItem('ibkr_connected');
-    }
-  }, []);
-
   // ── Stripe Tier Upgrade ───────────────────────────────────
 
-  /**
-   * Redirect to Stripe Checkout to upgrade the user's tier.
-   */
   const upgradeTier = useCallback(async (tier: 'member' | 'private') => {
     try {
       const token = (() => {
@@ -244,18 +199,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization:  `Bearer ${token}`,
         },
         body: JSON.stringify({
           tier,
           successUrl: `${window.location.origin}/settings/billing?upgraded=true`,
-          cancelUrl: `${window.location.origin}/settings/billing`,
+          cancelUrl:  `${window.location.origin}/settings/billing`,
         }),
       });
 
       if (!response.ok) throw new Error('Failed to create checkout session');
 
-      const { checkoutUrl } = await response.json();
+      const { checkoutUrl } = await response.json() as { checkoutUrl: string };
       window.location.href = checkoutUrl;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Upgrade failed.';
@@ -273,17 +228,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         error,
-        ibkrConnected,
-        alpacaConnected: ibkrConnected, // backwards compatibility alias
+        alpacaConnected,
+        ibkrConnected: alpacaConnected, // backwards compat alias
         subscription,
         login,
         logout,
         register,
         clearError,
-        connectIBKR,
-        disconnectIBKR,
-        connectAlpaca: connectIBKR,    // backwards compatibility alias
-        disconnectAlpaca: disconnectIBKR, // backwards compatibility alias
         upgradeTier,
       }}
     >

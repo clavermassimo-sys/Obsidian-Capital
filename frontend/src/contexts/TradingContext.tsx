@@ -21,7 +21,7 @@ import type {
   CommissionTier,
 } from '@/types/index';
 import { portfolioApi, tradesApi } from '@/services/api';
-import type { HoldingRaw } from '@/services/api';
+import type { HoldingRaw, PlaceOrderParams } from '@/services/api';
 
 // ── Commission Rates ──────────────────────────────────────────
 
@@ -305,40 +305,40 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     async (req: OrderRequest, tier: CommissionTier): Promise<Trade> => {
       const preview = await previewOrder(req, tier);
 
-      // Map frontend orderType → IBKR orderType
-      const ibkrOrderType: Record<string, string> = {
-        market: 'MKT',
-        limit:  'LMT',
-        stop:   'STP',
+      // Map frontend orderType → Alpaca Broker order type
+      const alpacaOrderType: Record<string, string> = {
+        market:        'market',
+        limit:         'limit',
+        stop:          'stop',
+        stop_limit:    'stop_limit',
+        trailing_stop: 'trailing_stop',
       };
 
-      // The backend /trades/order endpoint expects ticker, company_name, conid, side, qty, orderType, tif
-      // conid is looked up server-side via searchContracts when not provided, but the current
-      // validation schema requires it. We set conid=0 here and let the backend handle symbol search.
-      // NOTE: If the caller has already resolved the conid, pass it via req.conid.
+      // Build Alpaca-compatible order payload.
+      // No conid needed — Alpaca uses ticker symbol directly.
       const orderPayload = {
         ticker:       req.ticker,
         company_name: preview.companyName || req.ticker,
-        conid:        (req as OrderRequest & { conid?: number }).conid ?? 0,
-        side:         req.side.toUpperCase() as 'BUY' | 'SELL',
+        side:         req.side.toLowerCase() as 'buy' | 'sell',
         qty:          req.shares,
-        orderType:    ibkrOrderType[req.orderType] ?? 'MKT',
-        tif:          'DAY',
-        ...(req.limitPrice  !== undefined && { price:    req.limitPrice }),
-        ...(req.stopPrice   !== undefined && { auxPrice: req.stopPrice }),
+        orderType:    (alpacaOrderType[req.orderType] ?? 'market') as PlaceOrderParams['orderType'],
+        tif:          'day' as const,
+        ...(req.limitPrice !== undefined && { limitPrice: req.limitPrice }),
+        ...(req.stopPrice  !== undefined && { stopPrice:  req.stopPrice  }),
         estimatedPrice: preview.estimatedPrice,
       };
 
-      let orderResult: { data?: { trade_id?: string; order?: { orderId?: string; status?: string; avgFillPrice?: number } } } | null = null;
+      let orderResult: { data?: { trade_id?: string; order?: { id?: string; status?: string; filled_avg_price?: string } } } | null = null;
       try {
         orderResult = await tradesApi.placeOrder(orderPayload);
       } catch {
         // If API call fails, rethrow — we don't simulate real trades
-        throw new Error('Order submission failed. Please check your IBKR connection and try again.');
+        throw new Error('Order submission failed. Please ensure your brokerage account is active and try again.');
       }
 
-      const ibkrOrder = orderResult?.data?.order;
-      const price = ibkrOrder?.avgFillPrice ?? preview.estimatedPrice;
+      const brokerOrder = orderResult?.data?.order;
+      const filledAvg   = brokerOrder?.filled_avg_price ? parseFloat(brokerOrder.filled_avg_price) : undefined;
+      const price       = filledAvg ?? preview.estimatedPrice;
 
       const trade: Trade = {
         id:          orderResult?.data?.trade_id ?? `trd_${Date.now()}`,
@@ -351,7 +351,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         commission:  preview.commissionAmount,
         total:       preview.total,
         timestamp:   new Date().toISOString(),
-        status:      (ibkrOrder?.status?.toLowerCase() as Trade['status']) ?? 'pending',
+        status:      (brokerOrder?.status?.toLowerCase() as Trade['status']) ?? 'pending',
         limitPrice:  req.limitPrice,
       };
       setTrades((prev) => [trade, ...prev]);

@@ -20,13 +20,13 @@ interface IBKRConnectBannerProps {
 // ── Component ─────────────────────────────────────────────────
 
 export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConnectBannerProps) {
-  const { connectIBKR, ibkrConnected } = useAuth();
+  const { alpacaConnected } = useAuth();
   const [dismissed, setDismissed] = useState(() => {
     return localStorage.getItem('ibkr_banner_dismissed') === 'true';
   });
 
   // Don't render if connected or dismissed
-  if (ibkrConnected || dismissed) return null;
+  if (alpacaConnected || dismissed) return null;
 
   function handleDismiss() {
     setDismissed(true);
@@ -41,14 +41,8 @@ export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConne
       >
         <AlertCircle size={14} className="text-gold shrink-0" />
         <p className="text-xs font-sans text-[#a09a8e] flex-1">
-          Connect IBKR to enable live trading.
+          Your account is being activated. Trading will be available shortly.
         </p>
-        <button
-          onClick={() => connectIBKR(true)}
-          className="flex items-center gap-1 text-xs font-sans font-semibold text-gold hover:text-[#e0c070] transition-colors whitespace-nowrap"
-        >
-          Connect <ExternalLink size={11} />
-        </button>
       </div>
     );
   }
@@ -67,7 +61,7 @@ export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConne
             'linear-gradient(135deg, rgba(201,168,76,0.07) 0%, rgba(201,168,76,0.03) 100%)',
         }}
         role="banner"
-        aria-label="Connect Interactive Brokers account"
+        aria-label="Brokerage account activation notice"
       >
         {/* Subtle gold glow line at top */}
         <div
@@ -95,11 +89,11 @@ export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConne
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h3 className="font-sans text-sm font-semibold text-off-white leading-tight mb-1">
-                  Connect Interactive Brokers Account
+                  Account Activation In Progress
                 </h3>
                 <p className="text-xs text-off-white/50 leading-relaxed max-w-xl">
-                  Obsidian Capital executes trades through Interactive Brokers LLC (member FINRA/SIPC).
-                  You must link your IBKR account to trade.
+                  Your brokerage account is being activated. This typically takes 1–2 business days.
+                  You can browse the platform and set up your watchlist while you wait.
                 </p>
               </div>
 
@@ -115,7 +109,7 @@ export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConne
               </button>
             </div>
 
-            {/* Mode comparison pills */}
+            {/* Status pills */}
             <div className="mt-4 flex flex-wrap gap-3">
               <div
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-off-white/60"
@@ -126,8 +120,8 @@ export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConne
               >
                 <FlaskConical size={12} className="text-blue-400/70" />
                 <span>
-                  <strong className="text-off-white/80">Paper Mode</strong> — test trades using
-                  your IBKR paper trading account, no real money
+                  <strong className="text-off-white/80">Paper Trading</strong> — available while
+                  your account is being reviewed
                 </span>
               </div>
 
@@ -140,45 +134,18 @@ export function IBKRConnectBanner({ compact = false, className = '' }: IBKRConne
               >
                 <Zap size={12} className="text-green-400/70" />
                 <span>
-                  <strong className="text-off-white/80">Live Mode</strong> — execute real trades
-                  through your Interactive Brokers account
+                  <strong className="text-off-white/80">Live Trading</strong> — enabled
+                  automatically once your account is approved
                 </span>
               </div>
-            </div>
-
-            {/* CTA Buttons */}
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => connectIBKR(false)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
-                           text-obsidian transition-all duration-200
-                           hover:brightness-110 active:scale-[0.98]"
-                style={{
-                  background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)',
-                  boxShadow: '0 0 20px rgba(201,168,76,0.25)',
-                }}
-              >
-                <Zap size={14} />
-                Connect IBKR Account
-              </button>
-
-              <button
-                onClick={() => connectIBKR(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                           text-gold border border-gold/30 bg-transparent
-                           hover:bg-gold/8 active:scale-[0.98] transition-all duration-200"
-              >
-                <FlaskConical size={14} />
-                Use Paper Trading
-              </button>
             </div>
 
             {/* Regulatory disclaimer */}
             <div className="mt-4 flex items-start gap-2">
               <ShieldCheck size={11} className="text-off-white/25 mt-0.5 flex-shrink-0" />
               <p className="text-2xs text-off-white/30 leading-relaxed">
-                Securities trading provided by Interactive Brokers LLC, member FINRA/SIPC. All funds
-                held at Interactive Brokers. Obsidian Capital is not a registered broker-dealer.
+                Securities trading provided through our regulated brokerage partner, member FINRA/SIPC.
+                Your funds are held in your name in a segregated account.
               </p>
             </div>
           </div>
