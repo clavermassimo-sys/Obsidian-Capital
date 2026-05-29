@@ -484,7 +484,7 @@ export default function Register() {
   return (
     <div
       className="min-h-screen flex items-start justify-center px-4 py-12 relative overflow-hidden"
-      style={{ background: '#0a0a0f' }}
+      style={{ background: '#000000' }}
     >
       <div className="absolute inset-0 pointer-events-none"
         style={{ background: 'radial-gradient(ellipse 50% 40% at 50% 30%, rgba(201,165,78,0.04) 0%, transparent 70%)' }} />
@@ -493,7 +493,7 @@ export default function Register() {
 
       <div className="relative z-10 w-full max-w-md">
         <div className="rounded-2xl border border-border p-8"
-          style={{ background: '#111118', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}>
+          style={{ background: 'rgba(255,255,255,0.04)', backdropFilter: 'blur(40px) saturate(180%)', boxShadow: '0 24px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)' }}>
           <div className="flex flex-col items-center mb-7">
             <GemLogoSmall />
             <p className="text-xs font-bold tracking-[0.3em] text-gold uppercase font-sans mt-2">

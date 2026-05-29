@@ -321,7 +321,7 @@ export default function Login() {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-4 py-12 relative overflow-hidden"
-      style={{ background: '#0a0a0a' }}
+      style={{ background: '#000000' }}
     >
       {/* Background glow */}
       <div
@@ -343,7 +343,11 @@ export default function Login() {
         {/* Card */}
         <div
           className="rounded-2xl border border-border p-8"
-          style={{ background: '#111111', boxShadow: '0 24px 80px rgba(0,0,0,0.6)' }}
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            backdropFilter: 'blur(40px) saturate(180%)',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
+          }}
         >
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
