@@ -1,524 +1,369 @@
-/* ============================================================
-   Obsidian Capital — Order History Page
-   Real orders fetched from the API.
-   ============================================================ */
-
-import React, { useState, useMemo, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+/* Obsidian Capital — Orders (Apple Liquid Glass) */
+import React, { useState, useEffect, useCallback } from 'react';
+import { RefreshCw, Filter } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { tradesApi } from '@/services/api';
-import type { IBKROrder } from '@/services/api';
-import {
-  Download,
-  Filter,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  ArrowUpDown,
-  Check,
-  X,
-  Clock,
-  RefreshCw,
-} from 'lucide-react';
-import { formatCurrency, formatDateTime } from '@/utils/format';
 
-// ── Types ─────────────────────────────────────────────────────
+type FilterType = 'all' | 'open' | 'filled' | 'canceled';
 
-type OrderSide   = 'BUY' | 'SELL' | 'ALL';
-type OrderStatus = 'filled' | 'cancelled' | 'pending' | 'partial' | 'ALL';
+const FILTERS: { key: FilterType; label: string }[] = [
+  { key: 'all',      label: 'All'      },
+  { key: 'open',     label: 'Open'     },
+  { key: 'filled',   label: 'Filled'   },
+  { key: 'canceled', label: 'Canceled' },
+];
 
-interface DisplayOrder {
+interface Order {
   id: string;
-  date: string;
-  ticker: string;
-  type: 'BUY' | 'SELL';
-  orderType: string;
-  shares: number;
-  filledShares: number;
-  price: number;
-  commission: number;
-  total: number;
-  status: 'filled' | 'cancelled' | 'pending' | 'partial';
+  symbol?: string;
+  ticker?: string;
+  side: 'buy' | 'sell';
+  type?: string;
+  order_type?: string;
+  qty?: number | string;
+  filled_qty?: number | string;
+  price?: number | string;
+  filled_avg_price?: number | string;
+  commission?: number;
+  status: string;
+  submitted_at?: string;
+  created_at?: string;
 }
 
-function normaliseStatus(s: string): DisplayOrder['status'] {
-  if (s === 'filled')    return 'filled';
-  if (s === 'canceled' || s === 'cancelled') return 'cancelled';
-  if (s === 'partially_filled') return 'partial';
-  return 'pending';
-}
+const fmt = (n: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(n);
+const toNum = (v: unknown) => (typeof v === 'number' ? v : parseFloat(String(v)) || 0);
 
-function normaliseOrder(o: IBKROrder): DisplayOrder {
-  const qty        = parseFloat(String(o.qty))         || 0;
-  const filledQty  = parseFloat(String(o.filled_qty))  || 0;
-  const price      = parseFloat(String(o.filled_avg_price ?? o.limit_price ?? 0)) || 0;
-  const commission = o.commission ?? 0;
-  const total      = price * filledQty;
-  return {
-    id:           o.id,
-    date:         o.submitted_at,
-    ticker:       o.symbol,
-    type:         o.side === 'buy' ? 'BUY' : 'SELL',
-    orderType:    o.type.charAt(0).toUpperCase() + o.type.slice(1).replace(/_/g, ' '),
-    shares:       qty,
-    filledShares: filledQty,
-    price,
-    commission,
-    total,
-    status:       normaliseStatus(o.status),
+function StatusBadge({ status }: { status: string }) {
+  const s = status.toLowerCase();
+  const style: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '3px 8px',
+    borderRadius: '6px',
+    fontSize: '11px',
+    fontWeight: 500,
+    ...(s === 'filled' || s === 'complete'
+      ? { background: 'rgba(52,199,89,0.10)', color: '#34c759', border: '1px solid rgba(52,199,89,0.20)' }
+      : s === 'canceled' || s === 'cancelled' || s === 'expired'
+      ? { background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.40)', border: '1px solid rgba(255,255,255,0.10)' }
+      : { background: 'rgba(201,165,78,0.10)', color: '#c9a54e', border: '1px solid rgba(201,165,78,0.20)' }),
   };
+  return <span style={style}>{status.charAt(0).toUpperCase() + status.slice(1)}</span>;
 }
 
-// ── Status badge ──────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: DisplayOrder['status'] }) {
-  const config = {
-    filled:    { color: 'bg-gain/10 text-gain border-gain/20',          icon: <Check size={10} />,      label: 'Filled'    },
-    cancelled: { color: 'bg-loss/10 text-loss border-loss/20',          icon: <X size={10} />,          label: 'Cancelled' },
-    pending:   { color: 'bg-gold/10 text-gold border-gold/20',          icon: <Clock size={10} />,      label: 'Pending'   },
-    partial:   { color: 'bg-blue-500/10 text-blue-400 border-blue-500/20', icon: <RefreshCw size={10} />, label: 'Partial'   },
-  }[status];
+function OrdersSkeleton() {
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${config.color}`}>
-      {config.icon}
-      {config.label}
-    </span>
-  );
-}
-
-// ── Summary stat card ─────────────────────────────────────────
-
-function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="card-2 p-3 md:p-4">
-      <div className="text-[10px] md:text-xs text-off-white/40 uppercase tracking-wider mb-1 leading-tight">{label}</div>
-      <div className="text-base md:text-xl font-mono font-semibold tabular-nums text-off-white truncate">{value}</div>
-      {sub && <div className="text-[10px] md:text-xs text-off-white/30 mt-0.5 hidden sm:block">{sub}</div>}
+    <div style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto' }}>
+      <div className="skeleton" style={{ height: '28px', width: '120px', marginBottom: '24px' }} />
+      {[1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="skeleton" style={{ height: '56px', borderRadius: '8px', marginBottom: '4px' }} />
+      ))}
     </div>
   );
 }
 
-// ── Export CSV ────────────────────────────────────────────────
-
-function exportToCSV(orders: DisplayOrder[]) {
-  const headers = ['Order ID', 'Date/Time', 'Ticker', 'Type', 'Order Type', 'Shares', 'Price', 'Commission', 'Total', 'Status'];
-  const rows = orders.map((o) => [
-    o.id,
-    o.date,
-    o.ticker,
-    o.type,
-    o.orderType,
-    o.shares.toFixed(2),
-    o.price.toFixed(2),
-    o.commission.toFixed(2),
-    o.total.toFixed(2),
-    o.status,
-  ]);
-  const csvContent = [headers, ...rows].map((r) => r.join(',')).join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `obsidian-orders-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-// ── Orders Page ───────────────────────────────────────────────
-
-const PAGE_SIZE = 8;
-
-type SortKey = 'date' | 'ticker' | 'type' | 'shares' | 'price' | 'commission' | 'total' | 'status';
-
 export default function Orders() {
-  const [sideFilter, setSideFilter]     = useState<OrderSide>('ALL');
-  const [statusFilter, setStatusFilter] = useState<OrderStatus>('ALL');
-  const [tickerSearch, setTickerSearch] = useState('');
-  const [dateFrom, setDateFrom]         = useState('');
-  const [dateTo, setDateTo]             = useState('');
-  const [sortKey, setSortKey]           = useState<SortKey>('date');
-  const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('desc');
-  const [page, setPage]                 = useState(1);
+  const [orders, setOrders]     = useState<Order[]>([]);
+  const [filter, setFilter]     = useState<FilterType>('all');
+  const [loading, setLoading]   = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError]       = useState('');
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['orders'],
-    queryFn: () => tradesApi.getOrders(),
-    staleTime: 30_000,
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    setError('');
+    try {
+      const res = await tradesApi.getOrders();
+      setOrders(
+        Array.isArray((res as Record<string, unknown>).orders)
+          ? (res as Record<string, unknown>).orders as Order[]
+          : Array.isArray(res)
+          ? res as Order[]
+          : []
+      );
+    } catch (e: unknown) {
+      setError((e as Error).message || 'Failed to load orders');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = orders.filter((o) => {
+    if (filter === 'all') return true;
+    const s = o.status.toLowerCase();
+    if (filter === 'filled')   return s === 'filled' || s === 'complete';
+    if (filter === 'canceled') return s === 'canceled' || s === 'cancelled' || s === 'expired';
+    if (filter === 'open')     return s === 'new' || s === 'accepted' || s === 'pending_new' || s === 'partially_filled';
+    return true;
   });
 
-  const allOrders: DisplayOrder[] = useMemo(
-    () => (data?.orders ?? []).map(normaliseOrder),
-    [data]
-  );
-
-  const handleSort = useCallback((key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortKey(key); setSortDir('desc'); }
-    setPage(1);
-  }, [sortKey]);
-
-  const filtered = useMemo(() => {
-    let d = [...allOrders];
-    if (sideFilter !== 'ALL')   d = d.filter((o) => o.type === sideFilter);
-    if (statusFilter !== 'ALL') d = d.filter((o) => o.status === statusFilter);
-    if (tickerSearch.trim())    d = d.filter((o) => o.ticker.includes(tickerSearch.trim().toUpperCase()));
-    if (dateFrom)               d = d.filter((o) => new Date(o.date) >= new Date(dateFrom));
-    if (dateTo)                 d = d.filter((o) => new Date(o.date) <= new Date(dateTo + 'T23:59:59Z'));
-
-    d.sort((a, b) => {
-      let av: number | string = 0;
-      let bv: number | string = 0;
-      switch (sortKey) {
-        case 'date':       av = a.date;       bv = b.date;       break;
-        case 'ticker':     av = a.ticker;     bv = b.ticker;     break;
-        case 'type':       av = a.type;       bv = b.type;       break;
-        case 'shares':     av = a.shares;     bv = b.shares;     break;
-        case 'price':      av = a.price;      bv = b.price;      break;
-        case 'commission': av = a.commission; bv = b.commission; break;
-        case 'total':      av = a.total;      bv = b.total;      break;
-        case 'status':     av = a.status;     bv = b.status;     break;
-      }
-      if (av < bv) return sortDir === 'asc' ? -1 : 1;
-      if (av > bv) return sortDir === 'asc' ? 1 : -1;
-      return 0;
-    });
-    return d;
-  }, [allOrders, sideFilter, statusFilter, tickerSearch, dateFrom, dateTo, sortKey, sortDir]);
-
-  const totalPages  = Math.ceil(filtered.length / PAGE_SIZE);
-  const pageData    = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const summaryStats = useMemo(() => {
-    const filled = allOrders.filter((o) => o.status === 'filled');
-    const buys   = filled.filter((o) => o.type === 'BUY');
-    const sells  = filled.filter((o) => o.type === 'SELL');
-    return {
-      totalTrades:     filled.length,
-      totalCommission: filled.reduce((s, o) => s + o.commission, 0),
-      buyVolume:       buys.reduce((s, o) => s + o.total, 0),
-      sellVolume:      sells.reduce((s, o) => s + o.total, 0),
-    };
-  }, [allOrders]);
-
-  function SortIcon({ col }: { col: SortKey }) {
-    if (sortKey !== col) return <ArrowUpDown size={10} className="opacity-25" />;
-    return (
-      <span className="text-gold text-xs">
-        {sortDir === 'asc' ? '↑' : '↓'}
-      </span>
-    );
-  }
-
-  function ThBtn({ col, children }: { col: SortKey; children: React.ReactNode }) {
-    return (
-      <button
-        onClick={() => handleSort(col)}
-        className="flex items-center gap-1 text-xs font-medium text-off-white/40 uppercase tracking-wider hover:text-off-white/70 transition-colors"
-      >
-        {children}
-        <SortIcon col={col} />
-      </button>
-    );
-  }
+  if (loading) return <OrdersSkeleton />;
 
   return (
-    <div className="min-h-screen bg-obsidian">
-      <div className="max-w-[1440px] mx-auto px-4 md:px-6 py-6 md:py-8 space-y-4 md:space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+      style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto' }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '24px',
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontSize: '22px',
+              fontFamily: 'Playfair Display, serif',
+              fontWeight: 400,
+              color: 'rgba(255,255,255,0.90)',
+              letterSpacing: '-0.02em',
+              marginBottom: '3px',
+            }}
+          >
+            Orders
+          </h1>
+          <p style={{ fontSize: '13px', fontWeight: 300, color: 'rgba(255,255,255,0.35)' }}>
+            Your order history and active positions
+          </p>
+        </div>
+        <button
+          onClick={() => load(true)}
+          className="btn btn-glass btn-sm"
+          disabled={refreshing}
+          style={{ display: 'flex', gap: '6px', alignItems: 'center' }}
+        >
+          <RefreshCw
+            size={13}
+            style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }}
+          />
+          Refresh
+        </button>
+      </div>
 
-        {/* ── Header ─────────────────────────────────────────── */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="font-serif text-3xl font-medium text-off-white">Order History</h1>
-            <p className="text-sm text-off-white/40 mt-1">
-              {isLoading ? 'Loading…' : `${allOrders.length} total orders`}
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '20px' }}>
+        <Filter
+          size={14}
+          style={{ color: 'rgba(255,255,255,0.25)', alignSelf: 'center', marginRight: '4px' }}
+        />
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: f.key === filter ? 500 : 300,
+              cursor: 'pointer',
+              background: f.key === filter ? 'rgba(255,255,255,0.10)' : 'transparent',
+              border:
+                f.key === filter
+                  ? '1px solid rgba(255,255,255,0.12)'
+                  : '1px solid rgba(255,255,255,0.05)',
+              color:
+                f.key === filter ? 'rgba(255,255,255,0.90)' : 'rgba(255,255,255,0.40)',
+              transition: 'all 200ms ease',
+            }}
+          >
+            {f.label}
+            {f.key === filter && orders.length > 0 && (
+              <span style={{ marginLeft: '6px', fontSize: '10px', color: 'rgba(255,255,255,0.40)' }}>
+                {filtered.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <div
+          style={{
+            padding: '12px 16px',
+            borderRadius: '12px',
+            background: 'rgba(255,59,48,0.06)',
+            border: '1px solid rgba(255,59,48,0.12)',
+            marginBottom: '16px',
+            fontSize: '13px',
+            color: 'rgba(255,59,48,0.80)',
+            fontWeight: 300,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* Table */}
+      <div className="glass" style={{ overflow: 'hidden' }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: '64px', textAlign: 'center' }}>
+            <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.40)', fontWeight: 300 }}>
+              No orders yet
+            </p>
+            <p
+              style={{
+                fontSize: '13px',
+                color: 'rgba(255,255,255,0.25)',
+                fontWeight: 300,
+                marginTop: '6px',
+              }}
+            >
+              Your executed and pending orders will appear here
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => refetch()}
-              className="flex items-center gap-2 px-3 py-2 bg-surface-2 border border-border rounded-lg text-sm text-off-white/70 hover:border-gold/40 hover:text-off-white transition-colors"
-            >
-              <RefreshCw size={13} />
-              Refresh
-            </button>
-            <button
-              onClick={() => exportToCSV(filtered)}
-              disabled={filtered.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-surface-2 border border-border rounded-lg text-sm text-off-white/70 hover:border-gold/40 hover:text-off-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Download size={14} />
-              Export CSV
-            </button>
-          </div>
-        </div>
-
-        {/* ── Summary Stats ────────────────────────────────────── */}
-        <div className="grid grid-cols-4 gap-4">
-          <SummaryCard
-            label="Total Trades"
-            value={isLoading ? '—' : summaryStats.totalTrades.toString()}
-            sub="Filled orders"
-          />
-          <SummaryCard
-            label="Total Commission"
-            value={isLoading ? '—' : formatCurrency(summaryStats.totalCommission)}
-            sub="All filled orders"
-          />
-          <SummaryCard
-            label="Buy Volume"
-            value={isLoading ? '—' : formatCurrency(summaryStats.buyVolume)}
-            sub="Total purchased"
-          />
-          <SummaryCard
-            label="Sell Volume"
-            value={isLoading ? '—' : formatCurrency(summaryStats.sellVolume)}
-            sub="Total sold"
-          />
-        </div>
-
-        {/* ── Filter Bar ───────────────────────────────────────── */}
-        <div className="card-2 p-3 md:p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Filter size={13} className="text-gold" />
-            <span className="text-sm font-medium text-off-white/60">Filters</span>
-            <button
-              onClick={() => { setSideFilter('ALL'); setStatusFilter('ALL'); setTickerSearch(''); setDateFrom(''); setDateTo(''); setPage(1); }}
-              className="ml-auto text-xs text-off-white/30 hover:text-off-white/60 transition-colors"
-            >
-              Reset
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            {/* Ticker search */}
-            <div className="relative w-full sm:flex-1 sm:min-w-[160px] sm:max-w-xs">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-off-white/30" />
-              <input
-                type="text"
-                value={tickerSearch}
-                onChange={(e) => { setTickerSearch(e.target.value); setPage(1); }}
-                placeholder="Search ticker or company…"
-                className="w-full pl-8 pr-3 py-2 bg-surface-3 border border-border rounded-lg text-xs text-off-white placeholder-off-white/25 focus:outline-none focus:border-gold/40 transition-colors font-mono"
-              />
-            </div>
-
-            {/* Date range — hidden on mobile */}
-            <div className="hidden sm:flex items-center gap-2">
-              <span className="text-xs text-off-white/30">From</span>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-                className="px-3 py-2 bg-surface-3 border border-border rounded-lg text-xs text-off-white focus:outline-none focus:border-gold/40 transition-colors [color-scheme:dark]"
-              />
-              <span className="text-xs text-off-white/30">To</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-                className="px-3 py-2 bg-surface-3 border border-border rounded-lg text-xs text-off-white focus:outline-none focus:border-gold/40 transition-colors [color-scheme:dark]"
-              />
-            </div>
-
-            {/* Buy/Sell toggle */}
-            <div className="flex items-center bg-surface-3 border border-border rounded-lg p-0.5">
-              {(['ALL', 'BUY', 'SELL'] as OrderSide[]).map((side) => (
-                <button
-                  key={side}
-                  onClick={() => { setSideFilter(side); setPage(1); }}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
-                    sideFilter === side
-                      ? side === 'BUY'
-                        ? 'bg-gold text-obsidian'
-                        : side === 'SELL'
-                        ? 'bg-loss text-white'
-                        : 'bg-surface text-off-white'
-                      : 'text-off-white/40 hover:text-off-white'
-                  }`}
-                >
-                  {side}
-                </button>
-              ))}
-            </div>
-
-            {/* Status filter */}
-            <select
-              value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value as OrderStatus); setPage(1); }}
-              className="px-3 py-2 bg-surface-3 border border-border rounded-lg text-xs text-off-white focus:outline-none focus:border-gold/40 transition-colors appearance-none cursor-pointer"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="filled">Filled</option>
-              <option value="pending">Pending</option>
-              <option value="partial">Partial</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
-          </div>
-        </div>
-
-        {/* ── Orders Table ─────────────────────────────────────── */}
-        <div className="card overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <div className="flex items-center gap-2">
-              <h2 className="font-serif text-base font-medium text-off-white">Orders</h2>
-              {!isLoading && (
-                <span className="text-xs text-off-white/30">
-                  {filtered.length} result{filtered.length !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr className="border-b border-border bg-surface-2/50">
-                  {[
-                    { col: 'date'       as SortKey, label: 'Date / Time'   },
-                    { col: 'ticker'     as SortKey, label: 'Ticker'        },
-                    { col: 'type'       as SortKey, label: 'Type'          },
-                    { col: null,                    label: 'Order'         },
-                    { col: 'shares'     as SortKey, label: 'Shares'        },
-                    { col: 'price'      as SortKey, label: 'Price'         },
-                    { col: 'commission' as SortKey, label: 'Commission'    },
-                    { col: 'total'      as SortKey, label: 'Total'         },
-                    { col: 'status'     as SortKey, label: 'Status'        },
-                  ].map(({ col, label }) => (
-                    <th key={label} className="text-left py-3 px-4">
-                      {col ? <ThBtn col={col}>{label}</ThBtn> : (
-                        <span className="text-xs font-medium text-off-white/40 uppercase tracking-wider">{label}</span>
-                      )}
-                    </th>
-                  ))}
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  {['Date', 'Symbol', 'Side', 'Type', 'Qty', 'Price', 'Commission', 'Status'].map(
+                    (h) => (
+                      <th
+                        key={h}
+                        style={{
+                          padding: '12px 20px',
+                          textAlign:
+                            h === 'Date' || h === 'Symbol' || h === 'Side' ? 'left' : 'right',
+                          fontSize: '10px',
+                          fontWeight: 500,
+                          color: 'rgba(255,255,255,0.30)',
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {h}
+                      </th>
+                    )
+                  )}
                 </tr>
               </thead>
               <tbody>
-                {isLoading ? (
-                  <>
-                    {[1,2,3,4,5].map((i) => (
-                      <tr key={i} className="border-b border-border/50">
-                        {Array.from({ length: 9 }).map((_, j) => (
-                          <td key={j} className="py-3 px-4">
-                            <div className="h-4 rounded bg-surface-2 animate-pulse" />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </>
-                ) : isError ? (
-                  <tr>
-                    <td colSpan={9} className="py-12 text-center">
-                      <p className="text-sm text-off-white/40 mb-3">Failed to load orders</p>
-                      <button
-                        onClick={() => refetch()}
-                        className="flex items-center gap-1.5 px-3 py-1.5 mx-auto rounded-md border border-border bg-surface-2 text-xs font-sans text-[#a09a8e] hover:text-off-white hover:border-gold/40 transition-colors"
-                      >
-                        <RefreshCw size={12} />
-                        Retry
-                      </button>
-                    </td>
-                  </tr>
-                ) : pageData.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="py-12 text-center">
-                      <p className="text-sm text-off-white/40">
-                        {allOrders.length === 0
-                          ? 'No orders yet. Place your first trade.'
-                          : 'No orders match your filters.'}
-                      </p>
-                    </td>
-                  </tr>
-                ) : (
-                  pageData.map((order, i) => (
+                {filtered.map((o) => {
+                  const ticker = o.symbol ?? o.ticker ?? '—';
+                  const price  = toNum(o.filled_avg_price ?? o.price);
+                  const qty    = toNum(o.filled_qty ?? o.qty);
+                  const ts     = o.submitted_at ?? o.created_at;
+                  const date   = ts
+                    ? new Date(ts).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })
+                    : '—';
+                  const isBuy = o.side === 'buy';
+
+                  return (
                     <tr
-                      key={order.id}
-                      className={`border-b border-border/50 transition-colors duration-150 hover:bg-surface-3/60 ${
-                        i % 2 === 0 ? 'bg-surface-2/20' : 'bg-surface-3/10'
-                      }`}
+                      key={o.id}
+                      className="table-row-hover"
+                      style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
                     >
-                      <td className="py-3 px-4">
-                        <div className="font-mono text-xs text-off-white">
-                          {new Date(order.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                        </div>
-                        <div className="font-mono text-xs text-off-white/40">
-                          {new Date(order.date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                        </div>
+                      <td
+                        style={{
+                          padding: '14px 20px',
+                          fontSize: '12px',
+                          fontWeight: 300,
+                          color: 'rgba(255,255,255,0.40)',
+                        }}
+                      >
+                        {date}
                       </td>
-                      <td className="py-3 px-4">
-                        <div className="font-mono font-semibold text-gold text-sm">{order.ticker}</div>
+                      <td
+                        style={{
+                          padding: '14px 20px',
+                          fontSize: '14px',
+                          fontWeight: 500,
+                          color: 'rgba(255,255,255,0.85)',
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {ticker}
                       </td>
-                      <td className="py-3 px-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold ${
-                          order.type === 'BUY'
-                            ? 'bg-gold/15 text-gold border border-gold/30'
-                            : 'bg-loss/15 text-loss border border-loss/30'
-                        }`}>
-                          {order.type}
+                      <td style={{ padding: '14px 20px' }}>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: isBuy ? '#34c759' : '#ff3b30',
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          {o.side}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-xs text-off-white/50">{order.orderType}</td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-off-white">
-                        {order.filledShares > 0 && order.filledShares !== order.shares
-                          ? <>{order.filledShares.toLocaleString()}<span className="text-off-white/30">/{order.shares.toLocaleString()}</span></>
-                          : order.shares.toLocaleString()}
+                      <td
+                        style={{
+                          padding: '14px 20px',
+                          textAlign: 'right',
+                          fontSize: '12px',
+                          fontWeight: 300,
+                          color: 'rgba(255,255,255,0.50)',
+                          textTransform: 'capitalize',
+                        }}
+                      >
+                        {(o.type ?? o.order_type ?? 'market').replace('_', ' ')}
                       </td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-off-white">
-                        {order.price > 0 ? formatCurrency(order.price) : '—'}
+                      <td
+                        style={{
+                          padding: '14px 20px',
+                          textAlign: 'right',
+                          fontSize: '13px',
+                          fontWeight: 300,
+                          color: 'rgba(255,255,255,0.70)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {qty}
                       </td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm text-gold/70">
-                        {order.commission > 0 ? formatCurrency(order.commission) : '—'}
+                      <td
+                        style={{
+                          padding: '14px 20px',
+                          textAlign: 'right',
+                          fontSize: '13px',
+                          fontWeight: 300,
+                          color: 'rgba(255,255,255,0.70)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {price > 0 ? fmt(price) : '—'}
                       </td>
-                      <td className="py-3 px-4 font-mono tabular-nums text-sm font-medium text-off-white">
-                        {order.total > 0 ? formatCurrency(order.total) : '—'}
+                      <td
+                        style={{
+                          padding: '14px 20px',
+                          textAlign: 'right',
+                          fontSize: '13px',
+                          fontWeight: 300,
+                          color: 'rgba(255,255,255,0.50)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {o.commission != null ? fmt(o.commission) : '—'}
                       </td>
-                      <td className="py-3 px-4"><StatusBadge status={order.status} /></td>
+                      <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                        <StatusBadge status={o.status} />
+                      </td>
                     </tr>
-                  ))
-                )}
+                  );
+                })}
               </tbody>
             </table>
           </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-surface-2/30">
-              <span className="text-xs text-off-white/30">
-                Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
-              </span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="p-1.5 rounded hover:bg-surface-3 text-off-white/50 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPage(p)}
-                    className={`w-7 h-7 rounded text-xs font-mono transition-colors ${
-                      p === page
-                        ? 'bg-gold text-obsidian font-semibold'
-                        : 'text-off-white/50 hover:bg-surface-3 hover:text-off-white'
-                    }`}
-                  >
-                    {p}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  className="p-1.5 rounded hover:bg-surface-3 text-off-white/50 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
+        )}
       </div>
-    </div>
+    </motion.div>
   );
 }
