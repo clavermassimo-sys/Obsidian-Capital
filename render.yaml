@@ -1,0 +1,86 @@
+databases:
+  - name: oc-postgres
+    plan: free
+    databaseName: obsidian
+    user: obsidian
+
+services:
+  # ── Backend API ──────────────────────────────────────────────
+  - type: web
+    name: oc-backend
+    env: node
+    region: ohio
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: DATABASE_URL
+        fromDatabase:
+          name: oc-postgres
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_JWT_SECRET
+        generateValue: true
+
+      # ── Set these manually in the Render dashboard ──────────
+      - key: ADMIN_ACCESS_CODE
+        sync: false
+      - key: ALPACA_BROKER_KEY
+        sync: false
+      - key: ALPACA_BROKER_SECRET
+        sync: false
+      - key: POLYGON_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_MEMBER_PRICE_ID
+        sync: false
+      - key: STRIPE_PRIVATE_PRICE_ID
+        sync: false
+      - key: FRONTEND_URL
+        sync: false   # set to https://oc-frontend.onrender.com after deploy
+
+  # ── Frontend (main trading app) ──────────────────────────────
+  - type: web
+    name: oc-frontend
+    env: static
+    region: ohio
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false   # set to https://oc-backend.onrender.com/api
+      - key: VITE_WS_URL
+        sync: false   # set to https://oc-backend.onrender.com
+      - key: VITE_POLYGON_API_KEY
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ── Admin Dashboard ──────────────────────────────────────────
+  - type: web
+    name: oc-admin
+    env: static
+    region: ohio
+    rootDir: admin
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false   # set to https://oc-backend.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

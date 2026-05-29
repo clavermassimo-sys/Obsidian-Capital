@@ -1,9 +1,9 @@
 # Obsidian Capital
 
-A luxury stock brokerage and trading platform. Dark mode, commission-based trading, three-tier membership structure.
+A luxury stock brokerage and trading platform. Dark mode, flat-fee commission trading, three-tier membership.
 
 **Headquarters:** Washington D.C. | **Founded:** 2026  
-**Leadership:** CEO Massimo · COO Hugh · COO Marco
+**Leadership:** Massimo Claver-Carone (CEO) · Marco Torterelli (CTO) · Hugh Snyder (CFO)
 
 ---
 
@@ -11,121 +11,120 @@ A luxury stock brokerage and trading platform. Dark mode, commission-based tradi
 
 ```
 Obsidian-Capital/
-├── frontend/        # React 18 + TypeScript + Vite + Tailwind (port 5173)
+├── frontend/        # React 18 + TypeScript + Vite + Tailwind  (port 5173)
 ├── backend/         # Node.js + Express + TypeScript + Socket.IO (port 3001)
-├── admin/           # React admin dashboard (port 5174)
-└── README.md
+├── admin/           # React admin dashboard                     (port 5174)
+├── render.yaml      # One-click Render deployment blueprint
+└── docker-compose.yml
 ```
 
 ---
 
-## Quick Start
+## Deploy to Render (live URL in ~10 minutes)
 
-### Frontend
+Render hosts the backend, frontend, admin panel, and Postgres database for free.
 
-```bash
-cd frontend
-npm install
-npm run dev
-# → http://localhost:5173
-```
+### Step 1 — Create a Render account
+Go to **render.com** and sign up with your GitHub account.
 
-### Backend
+### Step 2 — Connect the repo and import the blueprint
+1. In the Render dashboard click **New → Blueprint**
+2. Connect your GitHub account and select the **Obsidian-Capital** repository
+3. Render will detect `render.yaml` and show 3 services + 1 database — click **Apply**
 
-```bash
-cd backend
-cp .env.example .env
-# Edit .env with your credentials
-npm install
-npm run dev
-# → http://localhost:3001
-```
+### Step 3 — Set secret environment variables
+After the initial deploy, go to each service and fill in the following in **Environment**:
 
-### Admin Dashboard
-
-```bash
-cd admin
-npm install
-npm run dev
-# → http://localhost:5174
-```
-
----
-
-## Environment Variables
-
-Copy `backend/.env.example` to `backend/.env` and fill in:
-
-| Variable | Description |
+**oc-backend**
+| Variable | Value |
 |---|---|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `JWT_SECRET` | Secret for signing JWTs |
-| `MARKET_DATA_API_KEY` | Market data provider API key |
-| `APEX_CLEARING_API_KEY` | Apex Clearing integration key |
-| `AWS_ACCESS_KEY` | AWS access key (S3, CloudFront) |
-| `AWS_SECRET_KEY` | AWS secret key |
-| `STRIPE_KEY` | Stripe key for Private tier subscriptions |
-| `SENDGRID_KEY` | SendGrid key for email notifications |
-| `TWILIO_KEY` | Twilio key for 2FA SMS |
+| `ADMIN_ACCESS_CODE` | Your admin portal access code |
+| `ALPACA_BROKER_KEY` | Alpaca Broker API key |
+| `ALPACA_BROKER_SECRET` | Alpaca Broker API secret |
+| `POLYGON_API_KEY` | Polygon.io API key |
+| `STRIPE_SECRET_KEY` | Stripe secret key |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook secret |
+| `STRIPE_MEMBER_PRICE_ID` | Stripe price ID for Member plan |
+| `STRIPE_PRIVATE_PRICE_ID` | Stripe price ID for Private plan |
+| `FRONTEND_URL` | `https://oc-frontend.onrender.com` |
+
+**oc-frontend**
+| Variable | Value |
+|---|---|
+| `VITE_API_URL` | `https://oc-backend.onrender.com/api` |
+| `VITE_WS_URL` | `https://oc-backend.onrender.com` |
+| `VITE_POLYGON_API_KEY` | Polygon.io API key |
+
+**oc-admin**
+| Variable | Value |
+|---|---|
+| `VITE_API_URL` | `https://oc-backend.onrender.com/api` |
+
+### Step 4 — Trigger a redeploy
+After setting env vars, click **Manual Deploy → Deploy latest commit** on each service.
+
+### Your live URLs
+| Service | URL |
+|---|---|
+| Trading app | `https://oc-frontend.onrender.com` |
+| Admin panel | `https://oc-admin.onrender.com` |
+| Backend API | `https://oc-backend.onrender.com` |
+
+> **Note:** Free tier services spin down after 15 minutes of inactivity — the first request after idle takes ~30 seconds. Upgrade to the Starter plan ($7/mo) to keep them always on.
 
 ---
 
-## Database Setup
+## Run with Docker (local or VPS)
 
 ```bash
-psql -U postgres -c "CREATE DATABASE obsidian_capital;"
-psql -U postgres -d obsidian_capital -f backend/src/db/schema.sql
+# Copy and fill in your secrets
+cp backend/.env.example backend/.env
+
+# Build and start everything
+docker compose up --build
+
+# Services:
+#   Frontend  → http://localhost:5173
+#   Backend   → http://localhost:3001
+#   Admin     → http://localhost:5174
 ```
 
-The schema creates: `users`, `holdings`, `trades`, `watchlist`, `audit_log` tables with seed data for demo accounts.
+---
+
+## Local Development
+
+```bash
+# Backend
+cd backend && cp .env.example .env   # fill in credentials
+npm install && npm run dev           # → http://localhost:3001
+
+# Frontend (new terminal)
+cd frontend && npm install && npm run dev   # → http://localhost:5173
+
+# Admin (new terminal)
+cd admin && npm install && npm run dev     # → http://localhost:5174
+```
 
 ---
 
 ## Commission Structure
 
-| Tier | Rate | Target Market |
+| Tier | Per Trade | Monthly Fee |
 |---|---|---|
-| Standard | 10–12% | Retail investors |
-| Obsidian Member | 7–9% | Active traders |
-| Obsidian Private | 5–6% | High-net-worth individuals |
-
-Commission is calculated at the midpoint of each range, disclosed on every order before execution per SEC Reg BI.
-
----
-
-## Revenue Projections
-
-| Year | Users | Annual Revenue |
-|---|---|---|
-| 1 | 1,000 | $2.55M |
-| 2 | 10,000 | $25.5M |
-| 3 | 50,000 | $127.5M |
-| 4 | 100,000 | $255M |
-| 5 | 500,000 | $1.27B |
-
-*Based on $500 avg trade × 5 trades/month/user × 8.5% blended commission*
+| Standard | $4.99 flat | Free |
+| Obsidian Member | $2.99 flat | $29.99/mo |
+| Obsidian Private | $0.99 flat | $199.99/mo |
 
 ---
 
 ## Tech Stack
 
-- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, Recharts, React Router v6, TanStack Query
-- **Backend:** Node.js, Express, TypeScript, Socket.IO, PostgreSQL (pg), JWT, bcryptjs
-- **Admin:** React 18, TypeScript, Vite, Tailwind CSS, Recharts
-- **Cloud:** AWS (EC2, RDS, S3, CloudFront)
-- **Clearing:** Apex Clearing API
-- **Payments:** Stripe (Private tier subscriptions)
-
----
-
-## Compliance
-
-- KYC identity verification on signup (name, SSN last 4, DOB, address)
-- SEC Regulation Best Interest (Reg BI) disclosure on every trade
-- SIPC membership ($500K account protection)
-- AML transaction monitoring
-- FINRA filing calendar tracked in admin portal
-- Cookie consent banner on landing page
+- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS, TanStack Query, Recharts, TradingView Lightweight Charts
+- **Backend:** Node.js, Express, TypeScript, Socket.IO, PostgreSQL, JWT, bcryptjs
+- **Brokerage:** Alpaca Broker API (white-label, programmatic account creation)
+- **Market Data:** Polygon.io (real-time quotes, OHLCV bars, news, movers)
+- **Payments:** Stripe (subscriptions + billing)
+- **Deployment:** Render (backend + static sites + Postgres)
 
 ---
 
@@ -133,14 +132,11 @@ Commission is calculated at the midpoint of each range, disclosed on every order
 
 | Token | Value | Usage |
 |---|---|---|
-| `obsidian` | `#0a0a0a` | Page backgrounds |
-| `surface` | `#111111` | Card backgrounds |
-| `surface-2` | `#1a1a1a` | Nested surfaces |
-| `surface-3` | `#222222` | Input backgrounds |
-| `gold` | `#c9a84c` | CTAs, accents, branding |
+| `obsidian` | `#0a0a0f` | Page backgrounds |
+| `surface` | `#111118` | Card backgrounds |
+| `gold` | `#c9a54e` | CTAs, accents, branding |
 | `off-white` | `#f0ede8` | Primary text |
-| `gain` | `#3d9e6e` | Positive returns |
-| `loss` | `#c0453a` | Negative returns |
-| `border` | `#2a2a2a` | All borders |
+| `gain` | `#3d9e6e` | Positive P&L |
+| `loss` | `#c0453a` | Negative P&L |
 
-Fonts: **Playfair Display** (headings) · **Inter** (data/body)
+Fonts: **Playfair Display** (headings) · **Inter** (body) · **JetBrains Mono** (prices/data)
