@@ -16,10 +16,9 @@ const TIERS = [
     icon: null,
     priceLabel: 'Free to join',
     priceDetail: '$0/month',
-    commissionMin: 0.10,
-    commissionMax: 0.12,
-    commissionLabel: '10–12% per trade',
-    savingsLabel: null,
+    flatFee: 4.99,
+    commissionLabel: '$4.99 per trade',
+    savingsLabel: null as string | null,
     ctaLabel: 'Get Started',
     ctaPath: '/register',
     featured: false,
@@ -33,16 +32,15 @@ const TIERS = [
     icon: Star,
     priceLabel: '$29.99/month',
     priceDetail: 'Billed monthly',
-    commissionMin: 0.07,
-    commissionMax: 0.09,
-    commissionLabel: '7–9% per trade',
-    savingsLabel: 'Save up to 3% vs Standard',
-    ctaLabel: 'Start Free Trial',
+    flatFee: 2.99,
+    commissionLabel: '$2.99 per trade',
+    savingsLabel: 'Save $2/trade vs Standard',
+    ctaLabel: 'Upgrade to Member',
     ctaPath: '/register?plan=member',
     featured: true,
     color: 'border-gold/40',
     badgeColor: 'text-gold',
-    rateColor: '#c9a84c',
+    rateColor: '#c9a54e',
   },
   {
     key: 'private',
@@ -50,10 +48,9 @@ const TIERS = [
     icon: Gem,
     priceLabel: '$199.99/month',
     priceDetail: 'Billed monthly',
-    commissionMin: 0.05,
-    commissionMax: 0.06,
-    commissionLabel: '5–6% per trade',
-    savingsLabel: 'Save up to 7% vs Standard',
+    flatFee: 0.99,
+    commissionLabel: '$0.99 per trade',
+    savingsLabel: 'Save $4/trade vs Standard',
     ctaLabel: 'Apply Now',
     ctaPath: '/register?plan=private',
     featured: false,
@@ -79,22 +76,19 @@ const OTHER_FEES = [
 // ── Commission Calculator ──────────────────────────────────────
 
 function CommissionCalculator() {
-  const [tradeValue, setTradeValue]   = useState(10000);
-  const [tradesPerMonth, setTradesPerMonth] = useState(10);
+  const [tradesPerMonth, setTradesPerMonth] = useState(20);
 
   const formatUSD = (n: number) =>
     n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
-  // Use midpoint rate for display
-  const rates = {
-    standard: 0.11,
-    member:   0.08,
-    private:  0.055,
-  };
+  const flatFees = { standard: 4.99, member: 2.99, private: 0.99 };
+  const monthlyFees = { standard: 0, member: 29.99, private: 199.99 };
 
-  const commission = (rate: number) => tradeValue * rate;
-  const annualSavings = (rateA: number, rateB: number) =>
-    (rateA - rateB) * tradeValue * tradesPerMonth * 12;
+  const totalMonthly = (key: keyof typeof flatFees) =>
+    flatFees[key] * tradesPerMonth + monthlyFees[key];
+
+  const annualSavingsVsStandard = (key: 'member' | 'private') =>
+    (totalMonthly('standard') - totalMonthly(key)) * 12;
 
   return (
     <section className="py-20 px-6 bg-surface/40">
@@ -107,125 +101,85 @@ function CommissionCalculator() {
             See How Much You Save
           </h2>
           <p className="text-off-white/50 text-sm max-w-lg mx-auto">
-            Adjust the sliders to see your estimated commission costs and annual savings by tier.
+            Adjust the slider to compare total monthly costs across tiers at your trading volume.
           </p>
           <div className="w-16 h-px bg-gradient-to-r from-transparent via-gold to-transparent mx-auto mt-4" />
         </div>
 
-        {/* Sliders */}
-        <div className="bg-surface border border-border rounded-2xl p-6 mb-8 space-y-6">
-          <div>
-            <div className="flex justify-between mb-2">
-              <label className="text-sm text-off-white/60 font-sans">Trade Value</label>
-              <span className="text-sm font-mono font-semibold text-gold">
-                {formatUSD(tradeValue)}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={100}
-              max={100000}
-              step={100}
-              value={tradeValue}
-              onChange={(e) => setTradeValue(Number(e.target.value))}
-              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, #c9a84c ${((tradeValue - 100) / 99900) * 100}%, #2a2a2a ${((tradeValue - 100) / 99900) * 100}%)`,
-              }}
-            />
-            <div className="flex justify-between text-xs text-off-white/25 mt-1 font-mono">
-              <span>$100</span>
-              <span>$100,000</span>
-            </div>
+        {/* Slider */}
+        <div className="bg-surface border border-border rounded-2xl p-6 mb-8">
+          <div className="flex justify-between mb-2">
+            <label className="text-sm text-off-white/60 font-sans">Trades per Month</label>
+            <span className="text-sm font-mono font-semibold text-gold">{tradesPerMonth} trades</span>
           </div>
-
-          <div>
-            <div className="flex justify-between mb-2">
-              <label className="text-sm text-off-white/60 font-sans">Trades per Month</label>
-              <span className="text-sm font-mono font-semibold text-gold">{tradesPerMonth}</span>
-            </div>
-            <input
-              type="range"
-              min={1}
-              max={100}
-              step={1}
-              value={tradesPerMonth}
-              onChange={(e) => setTradesPerMonth(Number(e.target.value))}
-              className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-              style={{
-                background: `linear-gradient(to right, #c9a84c ${((tradesPerMonth - 1) / 99) * 100}%, #2a2a2a ${((tradesPerMonth - 1) / 99) * 100}%)`,
-              }}
-            />
-            <div className="flex justify-between text-xs text-off-white/25 mt-1 font-mono">
-              <span>1</span>
-              <span>100</span>
-            </div>
+          <input
+            type="range"
+            min={1}
+            max={200}
+            step={1}
+            value={tradesPerMonth}
+            onChange={(e) => setTradesPerMonth(Number(e.target.value))}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, #c9a54e ${((tradesPerMonth - 1) / 199) * 100}%, #2a2a2a ${((tradesPerMonth - 1) / 199) * 100}%)`,
+            }}
+          />
+          <div className="flex justify-between text-xs text-off-white/25 mt-1 font-mono">
+            <span>1</span>
+            <span>200</span>
           </div>
         </div>
 
-        {/* Per-trade comparison */}
+        {/* Per-tier totals */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {(['standard', 'member', 'private'] as const).map((key) => {
             const tier = TIERS.find((t) => t.key === key)!;
-            const comm = commission(rates[key]);
+            const monthly = totalMonthly(key);
             return (
-              <div
-                key={key}
-                className={`bg-surface border ${tier.color} rounded-xl p-5 text-center`}
-              >
+              <div key={key} className={`bg-surface border ${tier.color} rounded-xl p-5 text-center`}>
                 <p className="text-xs font-bold tracking-[0.2em] uppercase mb-2 font-sans" style={{ color: tier.rateColor }}>
                   {tier.name}
                 </p>
-                <p className="text-2xl font-mono font-bold text-off-white">{formatUSD(comm)}</p>
-                <p className="text-xs text-off-white/40 font-sans mt-1">per trade</p>
+                <p className="text-2xl font-mono font-bold text-off-white">{formatUSD(flatFees[key])}</p>
+                <p className="text-xs text-off-white/40 font-sans mt-1">flat fee per trade</p>
                 <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-sm font-mono font-semibold text-off-white/70">
-                    {formatUSD(comm * tradesPerMonth)}
-                  </p>
-                  <p className="text-xs text-off-white/30 font-sans">per month</p>
+                  <p className="text-sm font-mono font-semibold text-off-white/70">{formatUSD(monthly)}</p>
+                  <p className="text-xs text-off-white/30 font-sans">total / month</p>
+                  {monthlyFees[key] > 0 && (
+                    <p className="text-xs text-off-white/20 font-sans mt-0.5">
+                      incl. {formatUSD(monthlyFees[key])}/mo subscription
+                    </p>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
 
-        {/* Annual savings projection */}
+        {/* Annual savings vs standard */}
         <div className="bg-surface-2 border border-gold/20 rounded-xl p-5">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp className="w-4 h-4 text-gold" />
             <p className="text-sm font-medium text-off-white font-sans">
-              Annual Savings Projection ({tradesPerMonth} trades/month)
+              Annual Savings vs Standard ({tradesPerMonth} trades/month)
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-surface rounded-lg p-4 text-center">
-              <p className="text-xs text-off-white/40 font-sans mb-1">Standard → Member</p>
-              <p
-                className="text-xl font-mono font-bold"
-                style={{
-                  color: annualSavings(rates.standard, rates.member) > 0 ? '#3d9e6e' : '#f0ede8',
-                }}
-              >
-                {formatUSD(annualSavings(rates.standard, rates.member))}
-              </p>
-              <p className="text-xs text-off-white/30 font-sans mt-1">saved per year</p>
-            </div>
-            <div className="bg-surface rounded-lg p-4 text-center">
-              <p className="text-xs text-off-white/40 font-sans mb-1">Standard → Private</p>
-              <p
-                className="text-xl font-mono font-bold"
-                style={{
-                  color: annualSavings(rates.standard, rates.private) > 0 ? '#3d9e6e' : '#f0ede8',
-                }}
-              >
-                {formatUSD(annualSavings(rates.standard, rates.private))}
-              </p>
-              <p className="text-xs text-off-white/30 font-sans mt-1">saved per year</p>
-            </div>
+            {(['member', 'private'] as const).map((key) => {
+              const savings = annualSavingsVsStandard(key);
+              return (
+                <div key={key} className="bg-surface rounded-lg p-4 text-center">
+                  <p className="text-xs text-off-white/40 font-sans mb-1">Standard → {key === 'member' ? 'Member' : 'Private'}</p>
+                  <p className="text-xl font-mono font-bold" style={{ color: savings > 0 ? '#3d9e6e' : '#c0453a' }}>
+                    {savings > 0 ? '+' : ''}{formatUSD(savings)}
+                  </p>
+                  <p className="text-xs text-off-white/30 font-sans mt-1">{savings > 0 ? 'saved' : 'extra cost'} per year</p>
+                </div>
+              );
+            })}
           </div>
           <p className="text-xs text-off-white/25 mt-3 font-sans">
-            * Projections use midpoint commission rates. Actual savings may vary.
-            Member plan savings are net of the $29.99/mo subscription fee.
+            * Savings are net of subscription fees. Break-even for Member: ~15 trades/month. Private: ~50 trades/month.
           </p>
         </div>
       </div>

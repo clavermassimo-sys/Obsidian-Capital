@@ -613,7 +613,7 @@ const PLANS = [
     name: 'Standard',
     icon: null,
     price: 'Free',
-    commission: '10–12% commission per trade',
+    commission: '$4.99 flat fee per trade',
     color: 'border-border',
     badge: 'text-off-white/60 bg-surface-3 border-border',
   },
@@ -622,7 +622,7 @@ const PLANS = [
     name: 'Member',
     icon: Star,
     price: '$29.99/mo',
-    commission: '7–9% commission per trade',
+    commission: '$2.99 flat fee per trade',
     color: 'border-indigo-500/30',
     badge: 'text-indigo-300 bg-[#1e1b4b] border-indigo-500/30',
   },
@@ -631,25 +631,18 @@ const PLANS = [
     name: 'Private',
     icon: Gem,
     price: '$199.99/mo',
-    commission: '5–6% commission per trade',
+    commission: '$0.99 flat fee per trade',
     color: 'border-gold/30',
     badge: 'text-gold bg-gold/10 border-gold/30',
   },
 ];
 
 const COMPARISON = [
-  { feature: 'Commission',   standard: '10–12%', member: '7–9%',     private: '5–6%' },
-  { feature: 'Monthly Fee',  standard: 'Free',   member: '$29.99',   private: '$199.99' },
-  { feature: 'Support',      standard: 'Standard', member: 'Priority', private: 'White-Glove' },
-  { feature: 'Analytics',    standard: 'Basic',  member: 'Advanced', private: 'Institutional' },
-  { feature: 'Advisor',      standard: '—',      member: '—',        private: 'Dedicated' },
-];
-
-const MOCK_INVOICES = [
-  { id: 'INV-2026-004', date: 'May 1, 2026',   description: 'Member Plan — May 2026',   amount: '$29.99', status: 'Paid'    },
-  { id: 'INV-2026-003', date: 'Apr 1, 2026',   description: 'Member Plan — Apr 2026',   amount: '$29.99', status: 'Paid'    },
-  { id: 'INV-2026-002', date: 'Mar 1, 2026',   description: 'Member Plan — Mar 2026',   amount: '$29.99', status: 'Paid'    },
-  { id: 'INV-2026-001', date: 'Feb 1, 2026',   description: 'Member Plan — Feb 2026',   amount: '$29.99', status: 'Pending' },
+  { feature: 'Commission',   standard: '$4.99/trade', member: '$2.99/trade', private: '$0.99/trade' },
+  { feature: 'Monthly Fee',  standard: 'Free',        member: '$29.99',      private: '$199.99'     },
+  { feature: 'Support',      standard: 'Standard',    member: 'Priority',    private: 'White-Glove' },
+  { feature: 'Analytics',    standard: 'Basic',       member: 'Advanced',    private: 'Institutional' },
+  { feature: 'Advisor',      standard: '—',           member: '—',           private: 'Dedicated'   },
 ];
 
 function BillingTab() {
@@ -848,49 +841,10 @@ function BillingTab() {
       {/* Invoice History */}
       <div>
         <h3 className="font-serif text-lg text-off-white mb-4">Invoice History</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                {['Date', 'Description', 'Amount', 'Status', ''].map((h) => (
-                  <th
-                    key={h}
-                    className="text-left py-3 px-4 text-xs font-medium text-off-white/40 uppercase tracking-wider font-sans last:text-right"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_INVOICES.map((inv) => (
-                <tr key={inv.id} className="border-b border-border/40 hover:bg-surface-2/40 transition-colors">
-                  <td className="py-3 px-4 text-off-white/60 font-sans text-xs">{inv.date}</td>
-                  <td className="py-3 px-4 text-off-white font-sans">{inv.description}</td>
-                  <td className="py-3 px-4 font-mono text-off-white">{inv.amount}</td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`px-2.5 py-1 rounded-full text-xs font-sans border ${
-                        inv.status === 'Paid'
-                          ? 'text-gain bg-gain/10 border-gain/20'
-                          : 'text-gold bg-gold/10 border-gold/20'
-                      }`}
-                    >
-                      {inv.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    {inv.status === 'Paid' && (
-                      <button className="inline-flex items-center gap-1.5 text-xs text-gold/70 hover:text-gold font-sans transition-colors border border-gold/20 hover:border-gold/40 px-3 py-1.5 rounded-lg">
-                        <Download className="w-3.5 h-3.5" />
-                        PDF
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="py-10 flex flex-col items-center gap-2 border border-border rounded-xl bg-surface">
+          <FileText className="w-8 h-8 text-off-white/15" />
+          <p className="text-sm text-off-white/40 font-sans">No invoices yet</p>
+          <p className="text-xs text-off-white/25 font-sans">Subscription invoices will appear here</p>
         </div>
         <p className="mt-3 text-xs text-off-white/30 font-sans">
           Commission history →{' '}
