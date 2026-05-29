@@ -1,13 +1,54 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 import { query } from '../config/database';
-import { authenticate, requireAdmin } from '../middleware/auth';
 import { adminLimiter } from '../middleware/rateLimit';
 import { COMMISSION_CONFIG } from '../config/commission';
 
 const router = Router();
 
-// All admin routes require authentication + admin role
-router.use(authenticate, requireAdmin, adminLimiter);
+// ─── Admin JWT Auth (separate from user auth — no DB lookup required) ─────────
+
+const ADMIN_JWT_SECRET =
+  process.env.ADMIN_JWT_SECRET ||
+  (process.env.JWT_SECRET || 'obsidian_secret_key_change_in_production') + ':admin-portal';
+
+const requireAdminToken = (req: Request, res: Response, next: NextFunction): void => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ success: false, error: 'Admin token required.' });
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, ADMIN_JWT_SECRET) as { isAdmin?: boolean };
+    if (!decoded.isAdmin) throw new Error('Not an admin token');
+    next();
+  } catch {
+    res.status(401).json({ success: false, error: 'Invalid or expired admin session. Please log in again.' });
+  }
+};
+
+// POST /api/admin/auth — exchange access code for a short-lived admin JWT
+router.post('/auth', adminLimiter, (req: Request, res: Response): void => {
+  const { code } = req.body as { code?: string };
+  const ADMIN_CODE = process.env.ADMIN_ACCESS_CODE;
+
+  if (!ADMIN_CODE) {
+    res.status(503).json({ success: false, error: 'Admin access not configured. Set ADMIN_ACCESS_CODE in environment.' });
+    return;
+  }
+
+  if (!code || code !== ADMIN_CODE) {
+    res.status(401).json({ success: false, error: 'Invalid access code.' });
+    return;
+  }
+
+  const token = jwt.sign({ isAdmin: true }, ADMIN_JWT_SECRET, { expiresIn: '8h' });
+  res.json({ success: true, data: { token } });
+});
+
+// All other admin routes require the admin JWT
+router.use(requireAdminToken, adminLimiter);
 
 // ─── GET /admin/stats ─────────────────────────────────────────────────────────
 // Platform-level statistics: user counts by tier, trade volume, commission revenue
