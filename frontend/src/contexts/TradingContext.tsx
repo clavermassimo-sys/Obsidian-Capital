@@ -23,12 +23,12 @@ import type {
 import { portfolioApi, tradesApi } from '@/services/api';
 import type { HoldingRaw, PlaceOrderParams } from '@/services/api';
 
-// ── Commission Rates ──────────────────────────────────────────
+// ── Flat-fee commission model ─────────────────────────────────
 
-const COMMISSION_RATES: Record<CommissionTier, { min: number; max: number }> = {
-  standard: { min: 0.10, max: 0.12 },
-  member: { min: 0.07, max: 0.09 },
-  private: { min: 0.05, max: 0.06 },
+const FLAT_COMMISSION: Record<CommissionTier, number> = {
+  standard: 4.99,
+  member:   2.99,
+  private:  0.99,
 };
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -274,14 +274,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         });
         return result as OrderPreview;
       } catch {
-        // Fallback to local calculation
-        const rates = COMMISSION_RATES[tier];
-        const midRate = (rates.min + rates.max) / 2;
+        // Fallback to local calculation using flat-fee model
+        const flatFee = FLAT_COMMISSION[tier];
         const holding = holdings.find((h) => h.ticker === req.ticker);
         const watchItem = watchlist.find((w) => w.ticker === req.ticker);
         const estimatedPrice = req.limitPrice ?? holding?.currentPrice ?? watchItem?.price ?? 100;
         const subtotal = estimatedPrice * req.shares;
-        const commissionAmount = subtotal * midRate;
         return {
           ticker:           req.ticker,
           companyName:      holding?.companyName ?? watchItem?.companyName ?? req.ticker,
@@ -289,9 +287,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           shares:           req.shares,
           estimatedPrice,
           subtotal,
-          commissionRate:   midRate,
-          commissionAmount,
-          total:            req.side === 'buy' ? subtotal + commissionAmount : subtotal - commissionAmount,
+          commissionRate:   subtotal > 0 ? flatFee / subtotal : 0,
+          commissionAmount: flatFee,
+          total:            req.side === 'buy' ? subtotal + flatFee : subtotal - flatFee,
           tier,
         };
       }

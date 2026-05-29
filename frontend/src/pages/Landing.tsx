@@ -201,10 +201,10 @@ function HeroSection({ onCTA }: { onCTA: (path: string) => void }) {
 // ── Section: Stats ────────────────────────────────────────────
 
 const STATS = [
-  { label: 'Year 1 Revenue Projection', value: '$2.55M', icon: DollarSign },
-  { label: 'Target Users', value: '500K+', icon: Users },
-  { label: 'Commission Tier Range', value: '5–12%', icon: TrendingUp },
-  { label: '5-Year Vision', value: '2026–2031', icon: Eye },
+  { label: 'Standard Commission', value: '$4.99', icon: DollarSign },
+  { label: 'Member Commission', value: '$2.99', icon: TrendingUp },
+  { label: 'Private Commission', value: '$0.99', icon: Eye },
+  { label: 'Founded', value: 'D.C. 2026', icon: Users },
 ];
 
 function StatsBar() {
@@ -251,7 +251,7 @@ const FEATURES = [
     title: 'Commission-Based Trading',
     description:
       'Straightforward commission structure based on your membership tier. No hidden fees, no surprises — just transparent pricing that rewards loyalty and account size.',
-    points: ['Standard: 10–12% commission', 'Member: 7–9% commission', 'Obsidian Private: 5–6% commission'],
+    points: ['Standard: $4.99 per trade', 'Member: $2.99 per trade', 'Obsidian Private: $0.99 per trade'],
     accent: 'border-gold/20',
     iconBg: 'bg-gold/10',
     iconColor: 'text-gold',
@@ -345,30 +345,33 @@ function FeaturesSection() {
 const COMMISSION_TIERS = [
   {
     tier: 'Standard',
-    rate: '10–12%',
-    minDeposit: '$0',
+    rate: '$4.99',
+    rateSub: 'per trade · free account',
+    monthly: null,
     support: 'Standard',
     execution: 'Standard',
-    features: ['Full platform access', 'Real-time data', 'Basic charts'],
+    features: ['Full platform access', 'Real-time market data', 'Charts & screener', 'Portfolio tracking'],
     badge: 'bg-surface-3 text-off-white/60 border border-border',
   },
   {
     tier: 'Member',
-    rate: '7–9%',
-    minDeposit: '$25,000',
+    rate: '$2.99',
+    rateSub: 'per trade · $29.99/month',
+    monthly: '$29.99/mo',
     support: 'Priority',
     execution: 'Enhanced',
-    features: ['Full platform access', 'Real-time data', 'Advanced charts', 'Priority support', 'Reduced commission'],
+    features: ['Full platform access', 'Real-time market data', 'Advanced charts', 'Priority support', '40% lower commission'],
     badge: 'bg-[#1e1b4b] text-indigo-300 border border-indigo-500/30',
     highlighted: true,
   },
   {
     tier: 'Obsidian Private',
-    rate: '5–6%',
-    minDeposit: '$100,000',
+    rate: '$0.99',
+    rateSub: 'per trade · $199.99/month',
+    monthly: '$199.99/mo',
     support: 'Concierge',
     execution: 'Priority',
-    features: ['Full platform access', 'Real-time data', 'Advanced charts', 'Dedicated manager', 'Lowest commission', 'Exclusive access'],
+    features: ['Full platform access', 'Real-time market data', 'Advanced charts', 'Dedicated relationship manager', '80% lower commission', 'Priority execution'],
     badge: 'bg-gold/10 text-gold-light border border-gold/30',
     featured: true,
   },
@@ -439,7 +442,7 @@ function CommissionTable() {
                   {tier.rate}
                 </span>
               </div>
-              <p className="text-xs text-off-white/40 mb-6">commission per trade</p>
+              <p className="text-xs text-off-white/40 mb-6">{tier.rateSub}</p>
 
               {/* Details */}
               <div className="space-y-3 mb-6 pb-6 border-b border-border">
@@ -481,9 +484,9 @@ function CommissionTable() {
 // ── Section: About ────────────────────────────────────────────
 
 const LEADERSHIP = [
-  { name: 'Massimo Caruso', role: 'Chief Executive Officer', initial: 'MC' },
-  { name: 'Hugh Montgomery', role: 'Chief Operating Officer', initial: 'HM' },
-  { name: 'Marco Ricci', role: 'Chief Operating Officer', initial: 'MR' },
+  { name: 'Massimo Claver-Carone', role: 'Chief Executive Officer & Founder', initial: 'MC' },
+  { name: 'Marco Torterelli', role: 'Chief Technology Officer', initial: 'MT' },
+  { name: 'Hugh Snyder', role: 'Chief Financial Officer', initial: 'HS' },
 ];
 
 function AboutSection() {
@@ -509,9 +512,9 @@ function AboutSection() {
                 service of a private bank.
               </p>
               <p>
-                Our commission-based model aligns our interests with yours. We succeed
-                when you succeed — no monthly fees, no inactivity charges, no conflict
-                of interest from payment-for-order-flow arrangements.
+                Our flat-fee commission model aligns our interests with yours. Standard
+                accounts pay $4.99 per trade — Members pay $2.99, Private clients just
+                $0.99. No hidden fees, no inactivity charges, no payment-for-order-flow.
               </p>
               <p>
                 From our flagship Obsidian Private tier to our accessible Standard
@@ -576,21 +579,24 @@ function AboutSection() {
 const LEADERS = [
   {
     firstName: 'Massimo',
-    lastName: 'Claver',
+    lastName: 'Claver-Carone',
     role: 'CEO & Founder',
     quote: 'Building the future of elite trading.',
+    initials: 'MC',
   },
   {
     firstName: 'Marco',
-    lastName: 'Tortorelli',
+    lastName: 'Torterelli',
     role: 'CTO',
     quote: 'Technology-first approach to brokerage.',
+    initials: 'MT',
   },
   {
     firstName: 'Hugh',
     lastName: 'Snyder',
     role: 'CFO',
     quote: 'Sound financial architecture for growth.',
+    initials: 'HS',
   },
 ];
 
@@ -625,15 +631,15 @@ function LeadershipSection() {
               key={leader.lastName}
               className="flex flex-col items-center text-center p-6 rounded-2xl bg-surface border border-border hover:border-gold/20 transition-colors duration-300"
             >
-              {/* Circular photo placeholder */}
+              {/* Avatar circle with initials */}
               <div
-                className="w-20 h-20 rounded-full flex items-center justify-center mb-5 flex-shrink-0 overflow-hidden"
+                className="w-20 h-20 rounded-full flex items-center justify-center mb-5 flex-shrink-0 font-serif text-xl font-semibold text-obsidian"
                 style={{
-                  border: '2px solid rgba(201,168,76,0.35)',
-                  background: 'radial-gradient(ellipse at 50% 30%, rgba(201,168,76,0.08) 0%, transparent 70%)',
+                  background: 'linear-gradient(135deg, #c9a84c 0%, #e8c96e 100%)',
+                  border: '2px solid rgba(201,168,76,0.5)',
                 }}
               >
-                <PersonSilhouette />
+                {leader.initials}
               </div>
 
               {/* Name */}
@@ -743,11 +749,10 @@ function Footer() {
         {/* Legal text */}
         <div className="space-y-3 text-xs text-off-white/25 leading-relaxed max-w-4xl">
           <p>
-            Securities trading is provided through{' '}
-            <strong className="text-off-white/35">Interactive Brokers LLC</strong>, member FINRA/SIPC.
-            Obsidian Capital is an introducing broker. All funds held at Interactive Brokers. All brokerage
-            services, including order execution and account custody, are provided exclusively by Interactive
-            Brokers LLC.
+            Brokerage services powered by{' '}
+            <strong className="text-off-white/35">Alpaca Securities LLC</strong>, member FINRA/SIPC.
+            Obsidian Capital is an introducing broker. Securities accounts held at Alpaca Securities LLC.
+            Order execution and account custody services provided exclusively by Alpaca Securities LLC.
           </p>
           <p>
             <strong className="text-off-white/35">SIPC Protection Notice:</strong> Securities held in accounts

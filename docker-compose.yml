@@ -1,0 +1,79 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oc_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-obsidian}
+      POSTGRES_USER: ${POSTGRES_USER:-obsidian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-obsidian}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - oc_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: oc_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgres://${POSTGRES_USER:-obsidian}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-obsidian}
+    ports:
+      - "3001:3001"
+    networks:
+      - oc_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+        VITE_WS_URL: ${VITE_WS_URL:-http://localhost:3001}
+        VITE_POLYGON_API_KEY: ${VITE_POLYGON_API_KEY:-}
+    container_name: oc_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - oc_network
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001/api}
+    container_name: oc_admin
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5174:80"
+    networks:
+      - oc_network
+
+volumes:
+  postgres_data:
+
+networks:
+  oc_network:
+    driver: bridge

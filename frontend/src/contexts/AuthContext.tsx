@@ -35,13 +35,8 @@ export interface RegisterPayload {
   name: string;
   email: string;
   password: string;
+  phone?: string;
   tier?: 'standard' | 'private';
-  dob?: string;
-  ssnLast4?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
 }
 
 // ── Mock Data ─────────────────────────────────────────────────
