@@ -67,23 +67,17 @@ function FeatureCard({ icon, title, description, highlight }: FeatureCardProps) 
 // ── Commission Calculator ─────────────────────────────────────
 
 function CommissionCalculator() {
-  const [volume, setVolume] = useState('');
+  const [trades, setTrades] = useState('');
 
-  const parseVolume = () => {
-    const raw = volume.replace(/[^0-9.]/g, '');
-    return parseFloat(raw) || 0;
-  };
+  const n = parseInt(trades.replace(/[^0-9]/g, '') || '0', 10);
+  const standardTotal = n * 4.99;
+  const memberTotal   = n * 2.99 + 29.99;
+  const privateTotal  = n * 0.99 + 199.99;
+  const savingsVsMember  = standardTotal - memberTotal;
+  const savingsVsPrivate = standardTotal - privateTotal;
 
-  const v = parseVolume();
-  const standardMin = v * 0.10;
-  const standardMax = v * 0.12;
-  const privateMin  = v * 0.05;
-  const privateMax  = v * 0.06;
-  const savingsMin  = standardMin - privateMax;
-  const savingsMax  = standardMax - privateMin;
-
-  const fmt = (n: number) =>
-    n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+  const fmt = (v: number) =>
+    v.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
 
   return (
     <div className="bg-surface border border-border rounded-xl p-6">
@@ -93,58 +87,59 @@ function CommissionCalculator() {
         </div>
         <div>
           <h3 className="font-serif text-xl font-medium text-off-white">Commission Savings Calculator</h3>
-          <p className="text-sm text-off-white/50 font-sans">See how much Private tier saves you</p>
+          <p className="text-sm text-off-white/50 font-sans">See how much you save with a higher tier</p>
         </div>
       </div>
 
       <div className="mb-6">
         <label className="block text-sm font-medium text-off-white/70 mb-2 font-sans">
-          Monthly Trade Volume
+          Trades per Month
         </label>
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-off-white/40 font-sans">$</span>
-          <input
-            type="text"
-            value={volume}
-            onChange={(e) => {
-              const raw = e.target.value.replace(/[^0-9]/g, '');
-              setVolume(raw ? parseInt(raw).toLocaleString() : '');
-            }}
-            placeholder="100,000"
-            className="w-full bg-surface-2 border border-border rounded-lg pl-7 pr-4 py-3 text-off-white font-sans text-sm focus:outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 transition-colors"
-          />
-        </div>
+        <input
+          type="text"
+          value={trades}
+          onChange={(e) => {
+            const raw = e.target.value.replace(/[^0-9]/g, '');
+            setTrades(raw ? parseInt(raw).toLocaleString() : '');
+          }}
+          placeholder="50"
+          className="w-full bg-surface-2 border border-border rounded-lg px-4 py-3 text-off-white font-sans text-sm focus:outline-none focus:border-gold/50 focus:ring-1 focus:ring-gold/20 transition-colors"
+        />
       </div>
 
-      {v > 0 && (
+      {n > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-surface-2 rounded-lg p-4 border border-border">
-            <p className="text-xs text-off-white/40 uppercase tracking-wider mb-1 font-sans">Standard Commission</p>
-            <p className="text-lg font-semibold text-loss font-mono">
-              {fmt(standardMin)}–{fmt(standardMax)}
+            <p className="text-xs text-off-white/40 uppercase tracking-wider mb-1 font-sans">Standard</p>
+            <p className="text-lg font-semibold text-loss font-mono">{fmt(standardTotal)}</p>
+            <p className="text-xs text-off-white/40 font-sans mt-1">$4.99/trade · no monthly fee</p>
+          </div>
+          <div className="bg-surface-2 rounded-lg p-4 border border-border">
+            <p className="text-xs text-off-white/40 uppercase tracking-wider mb-1 font-sans">Member</p>
+            <p className="text-lg font-semibold text-off-white font-mono">{fmt(memberTotal)}</p>
+            <p className="text-xs text-off-white/40 font-sans mt-1">
+              $2.99/trade · $29.99/mo
+              {savingsVsMember > 0 && (
+                <span className="text-gain ml-1">· save {fmt(savingsVsMember)}</span>
+              )}
             </p>
-            <p className="text-xs text-off-white/40 font-sans mt-1">10–12% rate</p>
           </div>
           <div className="bg-gold/5 rounded-lg p-4 border border-gold/20">
-            <p className="text-xs text-gold/70 uppercase tracking-wider mb-1 font-sans">Private Commission</p>
-            <p className="text-lg font-semibold text-gold font-mono">
-              {fmt(privateMin)}–{fmt(privateMax)}
+            <p className="text-xs text-gold/70 uppercase tracking-wider mb-1 font-sans">Obsidian Private</p>
+            <p className="text-lg font-semibold text-gold font-mono">{fmt(privateTotal)}</p>
+            <p className="text-xs text-gold/50 font-sans mt-1">
+              $0.99/trade · $199.99/mo
+              {savingsVsPrivate > 0 && (
+                <span className="text-gain ml-1">· save {fmt(savingsVsPrivate)}</span>
+              )}
             </p>
-            <p className="text-xs text-gold/50 font-sans mt-1">5–6% rate</p>
-          </div>
-          <div className="bg-gain/10 rounded-lg p-4 border border-gain/20">
-            <p className="text-xs text-gain/70 uppercase tracking-wider mb-1 font-sans">You Save</p>
-            <p className="text-lg font-semibold text-gain font-mono">
-              {fmt(savingsMin)}–{fmt(savingsMax)}
-            </p>
-            <p className="text-xs text-gain/50 font-sans mt-1">per month</p>
           </div>
         </div>
       )}
 
-      {v === 0 && (
+      {n === 0 && (
         <div className="text-center py-6 text-off-white/30 text-sm font-sans">
-          Enter your monthly trade volume above to see your savings
+          Enter how many trades you make per month to see your savings
         </div>
       )}
     </div>
@@ -181,7 +176,7 @@ function AlreadyPrivateBanner({ name }: { name: string }) {
       {/* Perks reminder */}
       <div className="relative mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {[
-          { icon: <TrendingDown className="w-4 h-4" />, text: '5–6% commissions' },
+          { icon: <TrendingDown className="w-4 h-4" />, text: '$0.99 flat commission' },
           { icon: <UserCheck className="w-4 h-4" />, text: 'Dedicated advisor' },
           { icon: <BarChart3 className="w-4 h-4" />, text: 'Advanced analytics' },
           { icon: <Headphones className="w-4 h-4" />, text: '24/7 priority support' },
@@ -462,8 +457,8 @@ export default function PrivatePage() {
             <FeatureCard
               icon={<TrendingDown className="w-5 h-5" />}
               title="Reduced Commissions"
-              description="Trade at 5–6% commission versus the standard 10–12%, saving up to 50% on every transaction."
-              highlight="5–6% vs 10–12%"
+              description="Trade at just $0.99 flat per trade versus the standard $4.99, saving up to 80% on every transaction."
+              highlight="$0.99 vs $4.99/trade"
             />
             <FeatureCard
               icon={<UserCheck className="w-5 h-5" />}
