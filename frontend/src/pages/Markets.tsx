@@ -210,11 +210,11 @@ export default function Markets() {
       ]);
 
       if (idxRes.status === 'fulfilled') {
-        const d = idxRes.value;
-        const raw: Array<Record<string, unknown>> = Array.isArray(d)
-          ? d
-          : (d as Record<string, unknown>)?.indices
-          ? ((d as Record<string, unknown>).indices as Array<Record<string, unknown>>)
+        const d = idxRes.value as unknown as Record<string, unknown>;
+        const raw: Array<Record<string, unknown>> = Array.isArray(idxRes.value)
+          ? (idxRes.value as Array<Record<string, unknown>>)
+          : Array.isArray(d?.indices)
+          ? (d.indices as Array<Record<string, unknown>>)
           : [];
         setIndices(
           raw.map((r) => ({
@@ -228,7 +228,7 @@ export default function Markets() {
       }
 
       if (moversRes.status === 'fulfilled') {
-        const d = moversRes.value as Record<string, unknown>;
+        const d = moversRes.value as unknown as Record<string, unknown>;
         const gRaw = Array.isArray(d?.gainers) ? d.gainers as Array<Record<string, unknown>> : [];
         const lRaw = Array.isArray(d?.losers)  ? d.losers  as Array<Record<string, unknown>> : [];
         setGainers(
@@ -252,8 +252,8 @@ export default function Markets() {
       }
 
       if (newsRes.status === 'fulfilled') {
-        const d = newsRes.value as Record<string, unknown>;
-        const raw = Array.isArray(d?.news) ? d.news : Array.isArray(d) ? d : [];
+        const d = newsRes.value as unknown as Record<string, unknown>;
+        const raw = Array.isArray(d?.news) ? d.news : Array.isArray(newsRes.value) ? newsRes.value : [];
         setNews((raw as NewsItem[]).slice(0, 8));
       }
 
@@ -289,7 +289,8 @@ export default function Markets() {
     searchDebounce.current = setTimeout(async () => {
       try {
         const res = await marketApi.searchAssets(search.trim());
-        const raw = (res as Record<string, unknown>)?.assets ?? (res as Record<string, unknown>)?.results ?? [];
+        const d = res as unknown as Record<string, unknown>;
+        const raw = Array.isArray(d?.assets) ? d.assets : Array.isArray(d?.results) ? d.results : [];
         setSearchResults((raw as Array<Record<string, unknown>>).slice(0, 6).map((r) => ({
           ticker: String(r.symbol ?? r.ticker ?? ''),
           symbol: String(r.symbol ?? r.ticker ?? ''),

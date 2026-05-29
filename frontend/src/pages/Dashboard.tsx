@@ -147,7 +147,8 @@ export default function Dashboard() {
       ]);
 
       if (accRes.status === 'fulfilled') {
-        const d = (accRes.value as Record<string, unknown>)?.account as Record<string, unknown> ?? accRes.value as Record<string, unknown>;
+        const raw = accRes.value as unknown as Record<string, unknown>;
+        const d: Record<string, unknown> = (raw?.account as Record<string, unknown>) ?? raw;
         setAccount({
           equity:          toNum(d.equity ?? d.portfolio_value),
           buying_power:    toNum(d.buying_power),
@@ -161,11 +162,8 @@ export default function Dashboard() {
         });
       }
       if (posRes.status === 'fulfilled') {
-        const h =
-          (posRes.value as Record<string, unknown>)?.holdings ??
-          (posRes.value as Record<string, unknown>)?.positions ??
-          posRes.value ??
-          [];
+        const raw = posRes.value as unknown as Record<string, unknown>;
+        const h = raw?.holdings ?? raw?.positions ?? posRes.value ?? [];
         setPositions(Array.isArray(h) ? h : []);
       }
     } catch (e: unknown) {
@@ -179,12 +177,9 @@ export default function Dashboard() {
   const loadHistory = useCallback(async (p: Period) => {
     try {
       const res = await portfolioApi.getHistory(PERIOD_MAP[p]);
-      const raw =
-        (res as Record<string, unknown>).history ??
-        (res as Record<string, unknown>).equity_history ??
-        res ??
-        [];
-      const pts: HistoryPoint[] = (Array.isArray(raw) ? raw : []).map(
+      const raw = res as unknown as Record<string, unknown>;
+      const rawArr = raw.history ?? raw.equity_history ?? res ?? [];
+      const pts: HistoryPoint[] = (Array.isArray(rawArr) ? rawArr : []).map(
         (pt: Record<string, unknown>) => ({
           t: (pt.t ?? pt.timestamp ?? pt.date ?? '') as string,
           v: toNum(pt.equity ?? pt.v ?? pt.value ?? 0),

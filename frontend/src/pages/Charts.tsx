@@ -75,26 +75,26 @@ const TF_MAP: Record<Timeframe, { apiTf: string; limit: number }> = {
 
 const CHART_OPTIONS = {
   layout: {
-    background: { type: ColorType.Solid, color: '#111111' },
-    textColor: '#f0ede8',
-    fontFamily: 'JetBrains Mono, monospace',
+    background: { type: ColorType.Solid, color: '#000000' },
+    textColor: 'rgba(255,255,255,0.55)',
+    fontFamily: 'SF Mono, JetBrains Mono, Menlo, monospace',
     fontSize: 11,
   },
   grid: {
-    vertLines: { color: '#1e1e1e' },
-    horzLines: { color: '#1e1e1e' },
+    vertLines: { color: 'rgba(255,255,255,0.04)' },
+    horzLines: { color: 'rgba(255,255,255,0.04)' },
   },
   crosshair: {
     mode: CrosshairMode.Normal,
-    vertLine: { color: '#c9a84c', width: 1 as const, style: 2 as const, labelBackgroundColor: '#222222' },
-    horzLine: { color: '#c9a84c', width: 1 as const, style: 2 as const, labelBackgroundColor: '#222222' },
+    vertLine: { color: '#c9a54e', width: 1 as const, style: 2 as const, labelBackgroundColor: '#1a1a1a' },
+    horzLine: { color: '#c9a54e', width: 1 as const, style: 2 as const, labelBackgroundColor: '#1a1a1a' },
   },
   rightPriceScale: {
-    borderColor: '#2a2a2a',
+    borderColor: 'rgba(255,255,255,0.08)',
     scaleMargins: { top: 0.1, bottom: 0.1 },
   },
   timeScale: {
-    borderColor: '#2a2a2a',
+    borderColor: 'rgba(255,255,255,0.08)',
     timeVisible: true,
     secondsVisible: false,
     rightOffset: 5,
@@ -305,12 +305,12 @@ export default function Charts() {
 
     if (chartType === 'candlestick') {
       const cs = chart.addCandlestickSeries({
-        upColor: '#3d9e6e',
-        downColor: '#c0453a',
-        borderUpColor: '#3d9e6e',
-        borderDownColor: '#c0453a',
-        wickUpColor: '#3d9e6e',
-        wickDownColor: '#c0453a',
+        upColor: '#34c759',
+        downColor: '#ff3b30',
+        borderUpColor: '#34c759',
+        borderDownColor: '#ff3b30',
+        wickUpColor: '#34c759',
+        wickDownColor: '#ff3b30',
       });
       const data: CandlestickData[] = candles.map((c) => ({
         time: c.time as CandlestickData['time'],
@@ -437,8 +437,8 @@ export default function Charts() {
       ...CHART_OPTIONS,
       width: container.clientWidth,
       height: container.clientHeight,
-      rightPriceScale: { borderColor: '#2a2a2a', scaleMargins: { top: 0.2, bottom: 0 } },
-      timeScale: { borderColor: '#2a2a2a', visible: false },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)', scaleMargins: { top: 0.2, bottom: 0 } },
+      timeScale: { borderColor: 'rgba(255,255,255,0.08)', visible: false },
     });
     volumeChartRef.current = chart;
 
@@ -557,7 +557,7 @@ export default function Charts() {
                 />
               </div>
               {showSearch && searchResults.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-border bg-surface-2 shadow-surface-lg z-30 overflow-hidden">
+                <div className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-border bg-surface-2 shadow-glass z-30 overflow-hidden">
                   {searchResults.map((s) => (
                     <button
                       key={s.symbol}
@@ -609,7 +609,7 @@ export default function Charts() {
             </div>
 
             {showSearch && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-border bg-surface-2 shadow-surface-lg z-30 overflow-hidden">
+              <div className="absolute top-full left-0 mt-1 w-64 rounded-lg border border-border bg-surface-2 shadow-glass z-30 overflow-hidden">
                 {searchResults.map((s) => (
                   <button
                     key={s.symbol}
@@ -800,13 +800,13 @@ export default function Charts() {
                 </div>
                 <ResponsiveContainer width="100%" height={130}>
                   <ComposedChart data={rsiChartData} margin={{ top: 4, right: Y_AXIS_WIDTH, left: 8, bottom: 0 }}>
-                    <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
+                    <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="time" hide />
                     <YAxis domain={[0, 100]} tick={{ fill: '#5a5450', fontSize: 9 }} tickLine={false} axisLine={false} ticks={[0, 30, 50, 70, 100]} width={Y_AXIS_WIDTH} orientation="right" />
-                    <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }} formatter={(v: number) => [v.toFixed(1), 'RSI']} />
-                    <ReferenceLine y={70} stroke="#c0453a" strokeDasharray="4 3" strokeOpacity={0.6} label={{ value: '70', position: 'right', fill: '#c0453a', fontSize: 9 }} />
-                    <ReferenceLine y={30} stroke="#3d9e6e" strokeDasharray="4 3" strokeOpacity={0.6} label={{ value: '30', position: 'right', fill: '#3d9e6e', fontSize: 9 }} />
-                    <ReferenceLine y={50} stroke="#2a2a2a" strokeDasharray="2 4" />
+                    <Tooltip contentStyle={{ background: 'rgba(10,10,10,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} formatter={(v: number) => [v.toFixed(1), 'RSI']} />
+                    <ReferenceLine y={70} stroke="#ff3b30" strokeDasharray="4 3" strokeOpacity={0.6} label={{ value: '70', position: 'right', fill: '#ff3b30', fontSize: 9 }} />
+                    <ReferenceLine y={30} stroke="#34c759" strokeDasharray="4 3" strokeOpacity={0.6} label={{ value: '30', position: 'right', fill: '#34c759', fontSize: 9 }} />
+                    <ReferenceLine y={50} stroke="rgba(255,255,255,0.06)" strokeDasharray="2 4" />
                     <Line type="monotone" dataKey="rsi" stroke="#60a5fa" strokeWidth={1.5} dot={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -827,14 +827,14 @@ export default function Charts() {
                 </div>
                 <ResponsiveContainer width="100%" height={130}>
                   <ComposedChart data={macdChartData} margin={{ top: 4, right: Y_AXIS_WIDTH, left: 8, bottom: 0 }}>
-                    <CartesianGrid stroke="#1a1a1a" strokeDasharray="3 3" vertical={false} />
+                    <CartesianGrid stroke="rgba(255,255,255,0.05)" strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="time" hide />
                     <YAxis tick={{ fill: '#5a5450', fontSize: 9 }} tickLine={false} axisLine={false} tickFormatter={(v: number) => v.toFixed(1)} width={Y_AXIS_WIDTH} orientation="right" />
-                    <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(3) : '—', '']} />
-                    <ReferenceLine y={0} stroke="#2a2a2a" />
+                    <Tooltip contentStyle={{ background: 'rgba(10,10,10,0.95)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} formatter={(v: unknown) => [typeof v === 'number' ? v.toFixed(3) : '—', '']} />
+                    <ReferenceLine y={0} stroke="rgba(255,255,255,0.06)" />
                     <Bar dataKey="hist" maxBarSize={5}>
                       {macdChartData.map((entry, idx) => (
-                        <Cell key={idx} fill={(entry.hist ?? 0) >= 0 ? '#3d9e6e' : '#c0453a'} fillOpacity={0.7} />
+                        <Cell key={idx} fill={(entry.hist ?? 0) >= 0 ? '#34c759' : '#ff3b30'} fillOpacity={0.7} />
                       ))}
                     </Bar>
                     <Line type="monotone" dataKey="macd" stroke="#34d399" strokeWidth={1.5} dot={false} connectNulls name="MACD" />

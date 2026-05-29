@@ -77,11 +77,10 @@ export default function Orders() {
     setError('');
     try {
       const res = await tradesApi.getOrders();
+      const d = res as unknown as Record<string, unknown>;
       setOrders(
-        Array.isArray((res as Record<string, unknown>).orders)
-          ? (res as Record<string, unknown>).orders as Order[]
-          : Array.isArray(res)
-          ? res as Order[]
+        Array.isArray(d.orders) ? d.orders as Order[]
+          : Array.isArray(res) ? res as Order[]
           : []
       );
     } catch (e: unknown) {
