@@ -42,30 +42,25 @@ export function getCommissionBreakdown(
   tier: 'standard' | 'member' | 'private'
 ): CommissionBreakdown {
   const config = COMMISSION_CONFIG[tier];
-  const rate = config.mid;
-  const amount = Math.round(subtotal * rate * 100) / 100;
+  const amount = config.flat;
 
   const savings = {
     vs_standard:
       tier !== 'standard'
-        ? Math.round(subtotal * (COMMISSION_CONFIG.standard.mid - rate) * 100) / 100
+        ? Math.round((COMMISSION_CONFIG.standard.flat - amount) * 100) / 100
         : 0,
     upgrade_to_member:
       tier === 'standard'
-        ? Math.round(
-            subtotal * (COMMISSION_CONFIG.standard.mid - COMMISSION_CONFIG.member.mid) * 100
-          ) / 100
+        ? Math.round((COMMISSION_CONFIG.standard.flat - COMMISSION_CONFIG.member.flat) * 100) / 100
         : 0,
     upgrade_to_private:
       tier !== 'private'
-        ? Math.round(
-            subtotal * (COMMISSION_CONFIG[tier].mid - COMMISSION_CONFIG.private.mid) * 100
-          ) / 100
+        ? Math.round((COMMISSION_CONFIG[tier].flat - COMMISSION_CONFIG.private.flat) * 100) / 100
         : 0,
   };
 
   return {
-    rate,
+    rate: subtotal > 0 ? parseFloat((amount / subtotal).toFixed(6)) : 0,
     rateDisplay: config.display,
     amount,
     subtotal,

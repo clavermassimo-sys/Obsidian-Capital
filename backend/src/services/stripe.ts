@@ -1,8 +1,15 @@
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-11-20.acacia' as Stripe.LatestApiVersion,
-});
+let _stripe: Stripe | null = null;
+
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error('[Stripe] STRIPE_SECRET_KEY is not set');
+    _stripe = new Stripe(key, { apiVersion: '2024-11-20.acacia' as Stripe.LatestApiVersion });
+  }
+  return _stripe;
+}
 
 export const SUBSCRIPTION_PRICES = {
   member: {
@@ -24,7 +31,7 @@ export const stripeService = {
 
   async createCustomer(email: string, name: string): Promise<string> {
     try {
-      const customer = await stripe.customers.create({
+      const customer = await getStripe().customers.create({
         email,
         name,
         metadata: { platform: 'obsidian-capital' },
@@ -46,14 +53,14 @@ export const stripeService = {
   }): Promise<Stripe.PaymentIntent> {
     try {
       // Retrieve customer to get their default payment method
-      const customer = await stripe.customers.retrieve(params.customerId) as Stripe.Customer;
+      const customer = await getStripe().customers.retrieve(params.customerId) as Stripe.Customer;
       const defaultPm = customer.invoice_settings?.default_payment_method as string | null;
 
       if (!defaultPm) {
         throw new Error('No default payment method on file for customer');
       }
 
-      const paymentIntent = await stripe.paymentIntents.create({
+      const paymentIntent = await getStripe().paymentIntents.create({
         amount: params.amount,
         currency: 'usd',
         customer: params.customerId,
@@ -84,7 +91,7 @@ export const stripeService = {
         throw new Error(`Stripe price ID for tier '${tier}' is not configured`);
       }
 
-      const subscription = await stripe.subscriptions.create({
+      const subscription = await getStripe().subscriptions.create({
         customer: customerId,
         items: [{ price: priceConfig.priceId }],
         payment_behavior: 'default_incomplete',
@@ -103,7 +110,7 @@ export const stripeService = {
   async cancelSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
     try {
       // Cancel at period end to give the user through their billing cycle
-      const subscription = await stripe.subscriptions.update(subscriptionId, {
+      const subscription = await getStripe().subscriptions.update(subscriptionId, {
         cancel_at_period_end: true,
       });
       return subscription;
@@ -115,7 +122,7 @@ export const stripeService = {
 
   async getSubscription(subscriptionId: string): Promise<Stripe.Subscription> {
     try {
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
       return subscription;
     } catch (err) {
       const e = err as Stripe.StripeRawError;
@@ -127,7 +134,7 @@ export const stripeService = {
 
   async createSetupIntent(customerId: string): Promise<Stripe.SetupIntent> {
     try {
-      const setupIntent = await stripe.setupIntents.create({
+      const setupIntent = await getStripe().setupIntents.create({
         customer: customerId,
         payment_method_types: ['card'],
         usage: 'off_session',
@@ -141,7 +148,7 @@ export const stripeService = {
 
   async getPaymentMethods(customerId: string): Promise<Stripe.PaymentMethod[]> {
     try {
-      const methods = await stripe.paymentMethods.list({
+      const methods = await getStripe().paymentMethods.list({
         customer: customerId,
         type: 'card',
       });
@@ -157,7 +164,7 @@ export const stripeService = {
     paymentMethodId: string
   ): Promise<void> {
     try {
-      await stripe.customers.update(customerId, {
+      await getStripe().customers.update(customerId, {
         invoice_settings: { default_payment_method: paymentMethodId },
       });
     } catch (err) {
@@ -170,7 +177,7 @@ export const stripeService = {
 
   async getInvoices(customerId: string): Promise<Stripe.Invoice[]> {
     try {
-      const invoices = await stripe.invoices.list({
+      const invoices = await getStripe().invoices.list({
         customer: customerId,
         limit: 24,
       });
@@ -186,7 +193,7 @@ export const stripeService = {
   constructWebhookEvent(payload: Buffer, signature: string): Stripe.Event {
     const secret = process.env.STRIPE_WEBHOOK_SECRET || '';
     try {
-      return stripe.webhooks.constructEvent(payload, signature, secret);
+      return getStripe().webhooks.constructEvent(payload, signature, secret);
     } catch (err) {
       const e = err as Stripe.StripeRawError;
       throw new Error(`[Stripe] Webhook signature verification failed: ${e.message}`);
@@ -194,4 +201,4 @@ export const stripeService = {
   },
 };
 
-export default stripe;
+export default { getInstance: getStripe };

@@ -1,8 +1,14 @@
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-11-20.acacia' as Stripe.LatestApiVersion,
-});
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error('[Identity] STRIPE_SECRET_KEY is not set');
+    _stripe = new Stripe(key, { apiVersion: '2024-11-20.acacia' as Stripe.LatestApiVersion });
+  }
+  return _stripe;
+}
 
 export const identityService = {
   // ─── createVerificationSession ────────────────────────────────────────────
@@ -14,7 +20,7 @@ export const identityService = {
     email: string
   ): Promise<{ id: string; clientSecret: string; url: string }> {
     try {
-      const session = await stripe.identity.verificationSessions.create({
+      const session = await getStripe().identity.verificationSessions.create({
         type: 'document',
         options: {
           document: {
@@ -51,7 +57,7 @@ export const identityService = {
     lastError?: string;
   }> {
     try {
-      const session = await stripe.identity.verificationSessions.retrieve(sessionId);
+      const session = await getStripe().identity.verificationSessions.retrieve(sessionId);
 
       return {
         id: session.id,
@@ -69,7 +75,7 @@ export const identityService = {
 
   async isVerified(sessionId: string): Promise<boolean> {
     try {
-      const session = await stripe.identity.verificationSessions.retrieve(sessionId);
+      const session = await getStripe().identity.verificationSessions.retrieve(sessionId);
       return session.status === 'verified';
     } catch (err) {
       const e = err as Stripe.StripeRawError;
